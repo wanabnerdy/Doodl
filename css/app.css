@@ -153,8 +153,15 @@ html, body {
   padding: 12px; margin-bottom: 12px;
 }
 .hl-card .time { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .5px; }
-.hl-card canvas { width: 100%; border-radius: 8px; background: var(--paper); margin: 9px 0; display: block; }
-.hl-card .quote { font-size: 14px; color: var(--fg); }
+.hl-card .body { display: flex; gap: 12px; align-items: flex-start; margin-top: 9px; }
+.hl-card canvas {
+  width: 108px; flex: none; border-radius: 8px; background: var(--paper); display: block;
+  border: 1px solid var(--line);
+}
+.hl-card.big .body { display: block; }
+.hl-card.big canvas { width: 100%; margin-bottom: 10px; }
+.hl-card .quote { font-size: 14px; color: var(--fg); flex: 1; min-width: 0; }
+.hl-card .tap { color: var(--dim); font-size: 11px; margin-top: 6px; }
 .hl-card .quote .before { color: var(--dim); }
 .hl-card .quote mark { background: rgba(255,179,71,.28); color: var(--fg); border-radius: 3px; padding: 0 2px; }
 
