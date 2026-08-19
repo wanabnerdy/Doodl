@@ -15,6 +15,9 @@ const note = (ok, label, extra = '') => {
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ ...devices['iPhone 13'], hasTouch: true });
+// The session teardown asks for the microphone to reset the audio route. Granting it
+// here keeps the test on the same path a real device takes.
+await context.grantPermissions(['microphone']);
 const page = await context.newPage();
 
 const consoleErrors = [];
@@ -114,8 +117,11 @@ note(await page.evaluate(() => window.__doodl.strokeCount()) === 3, 'drawing con
 
 // --- finish ---------------------------------------------------------------
 await page.click('#endBtn');
-await page.waitForTimeout(700);
-note(await page.locator('#wrap.active').count() === 1, 'wrap-up screen opens');
+// Waiting on the screen rather than a fixed delay: finishing must not be gated on the
+// audio-route reset that follows it.
+const wrapOpened = await page.locator('#wrap.active').waitFor({ timeout: 4000 })
+  .then(() => true).catch(() => false);
+note(wrapOpened, 'wrap-up screen opens');
 note(await page.locator('.hl-card').count() === 2, 'a card per highlight');
 note(await page.locator('.hl-card canvas').count() === 2, 'each highlight re-renders a doodle snapshot');
 

@@ -46,11 +46,12 @@ class FakeRecognition {
 globalThis.window = { SpeechRecognition: FakeRecognition };
 // speech.js checks visibility before reclaiming the microphone, so the stub needs it
 let chaserRuns = 0;
+let permissionState = 'prompt';   // iOS may report this even mid-session
 // Node supplies its own read-only navigator, so it has to be defined over.
 Object.defineProperty(globalThis, 'navigator', {
   configurable: true,
   value: {
-    permissions: { query: async () => ({ state: 'granted' }) },
+    permissions: { query: async () => ({ state: permissionState }) },
     mediaDevices: {
       getUserMedia: async () => { chaserRuns++; return { getTracks: () => [{ stop() {} }] }; }
     }
@@ -164,6 +165,8 @@ await t.end();   // async now: it waits briefly for a trailing final, then frees
 // dictation working while speech recognition breaks it, so the harmless one is used
 // to chase the harmful one.
 check(chaserRuns === 1, 'ending a session resets the audio route', chaserRuns + ' runs');
+console.log('          ran with permission reporting \'' + permissionState +
+            '\' — a stricter guard would have skipped it');
 
 const last = t.utterances[t.utterances.length - 1];
 check(t.utterances.length === 3, 'unfinalised trailing speech is kept, not lost',

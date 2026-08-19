@@ -21,7 +21,8 @@ const SAMPLE_INTERVAL_MS = 250;
 const RESTART_DELAY_MS = 300;
 const STALE_AFTER_MS = 20000;
 const RELEASE_GRACE_MS = 700;
-const CHASER_MS = 400;   // long enough for a trailing final, short enough to feel instant
+const CHASER_MS = 400;
+const CHASER_TIMEOUT_MS = 2500;   // the reset is best-effort; it must never hang the wrap-up   // long enough for a trailing final, short enough to feel instant
 
 export function createTranscriber({ now, onState, onUtterance, log }) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -46,17 +47,33 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
   // Guarded on an already-granted permission: requesting the microphone when it is
   // still in the 'prompt' state would throw a dialog at someone who just finished.
   async function resetAudioRoute() {
+    // Only an explicit denial is a reason to skip. iOS tracks the speech-recognition
+    // grant separately from getUserMedia, so this can still read 'prompt' after a
+    // session that has been listening for minutes — and skipping on anything short of
+    // 'denied' would quietly disable the one thing measured to work. The probe that
+    // proved this out had no guard at all and raised no dialog.
     try {
       const status = await navigator.permissions.query({ name: 'microphone' });
-      if (status.state !== 'granted') return;
-    } catch (e) { return; }        // cannot tell — do not risk a surprise prompt
+      say('speech: mic permission reads ' + status.state);
+      if (status.state === 'denied') return;
+    } catch (e) { /* cannot tell — attempt it anyway */ }
+    // Bounded: on a device with no microphone, or where the request stalls awaiting a
+    // decision, this would otherwise sit between the user tapping Finish and their
+    // session appearing.
+    let stream = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await Promise.race([
+        navigator.mediaDevices.getUserMedia({ audio: true }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), CHASER_TIMEOUT_MS))
+      ]);
       await new Promise(r => setTimeout(r, CHASER_MS));
-      stream.getTracks().forEach(t => t.stop());
       say('speech: audio route reset');
     } catch (e) {
-      say('speech: route reset failed — ' + e.name);
+      say('speech: route reset skipped — ' + (e.name === 'Error' ? e.message : e.name));
+    } finally {
+      // The request may still land after the race is lost; close it either way.
+      if (stream) stream.getTracks().forEach(t => t.stop());
     }
   }
 
@@ -274,7 +291,10 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
           try { dying.abort(); } catch (e) { /* nothing left to abort */ }
           flushPending();
           say('speech: microphone released');
-          await resetAudioRoute();
+          // Deliberately not awaited: the transcript is complete at this point, so the
+          // wrap-up should appear straight away. The route reset is repair work that
+          // belongs after the user has their session, not in front of it.
+          resetAudioRoute();
           resolve();
         }, RELEASE_GRACE_MS);
       });
