@@ -40,6 +40,19 @@
 
 <a class="back" href="../">&larr; This is a test page. Go to the Doodl app</a>
 
+<div class="card" style="border-color:#3a4152">
+  <h2>Before you start: audio route</h2>
+  <p>With Bluetooth headphones connected, iOS switches them from stereo playback to the
+     low-quality call profile whenever any app wants the microphone, and switches back
+     after. That negotiation is a strong suspect on its own, so record which route you
+     are on — and ideally run this page once with Bluetooth connected and once without.</p>
+  <div class="verdict">
+    <button onclick="setRoute(true)" id="rt-y">Bluetooth connected</button>
+    <button onclick="setRoute(false)" id="rt-n">Phone mic only</button>
+  </div>
+  <div class="state" id="st-route">Not set</div>
+</div>
+
 <h1>Which one breaks the microphone?</h1>
 <p class="sub">Three different ways a web page can use the mic. Run <b>one</b>, then switch to your dictation app and try to talk. Come back and record what happened. Force-quit and reopen the dictation app between tests so each one starts clean.</p>
 
@@ -80,7 +93,28 @@
 <pre id="out" style="display:none"></pre>
 
 <script>
-const R = { ua: navigator.userAgent, tests: {} };
+const R = { ua: navigator.userAgent, bluetooth: null, devices: [], tests: {} };
+
+function setRoute(on) {
+  R.bluetooth = on;
+  $('st-route').textContent = on
+    ? 'Recorded: Bluetooth headphones connected.'
+    : 'Recorded: phone microphone only.';
+  $('st-route').className = 'state done';
+  $('rt-y').style.borderColor = on ? 'var(--accent)' : 'var(--line)';
+  $('rt-n').style.borderColor = on ? 'var(--line)' : 'var(--accent)';
+}
+
+// Device labels are only exposed once permission is granted, so this runs after a
+// test rather than before — it records the actual input route by name.
+async function captureDevices(k) {
+  try {
+    const list = await navigator.mediaDevices.enumerateDevices();
+    const inputs = list.filter(d => d.kind === 'audioinput').map(d => d.label || '(unnamed)');
+    R.devices = inputs;
+    if (R.tests[k]) R.tests[k].inputsSeen = inputs;
+  } catch (e) { /* not available on this browser */ }
+}
 const $ = id => document.getElementById(id);
 
 function state(k, msg, done) {
@@ -89,7 +123,8 @@ function state(k, msg, done) {
   el.className = 'state' + (done ? ' done' : '');
 }
 function finished(k, detail) {
-  R.tests[k] = Object.assign({ ran: true }, detail);
+  R.tests[k] = Object.assign({ ran: true, bluetooth: R.bluetooth }, detail);
+  captureDevices(k);
   state(k, 'Done — now switch to your dictation app and try it, then come back.', true);
   $('v-' + k.toLowerCase()).style.display = 'flex';
   $('btn-' + k.toLowerCase()).disabled = true;
