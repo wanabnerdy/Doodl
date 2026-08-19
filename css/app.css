@@ -30,9 +30,12 @@ html, body {
   html, body { height: 100svh; }
 }
 
-/* CSS units still guess. --app-h is measured from visualViewport in JS, which is the
-   only thing that reports what iOS Safari is actually leaving visible, and it wins. */
-html, body { height: var(--app-h, 100svh); }
+/* visualViewport can report MORE than is actually visible on iOS — it includes the
+   strip the address bar sits over — so it is only ever allowed to shrink the box,
+   never grow it past what svh says. Measured live in JS for keyboards and rotation. */
+@supports (height: min(100px, 100svh)) {
+  html, body { height: min(var(--app-h, 100svh), 100svh); }
+}
 
 /* Width 0 so it is invisible; its height reports the safe-area inset for diagnostics. */
 #insetProbe { position: fixed; bottom: 0; left: 0; width: 0; height: env(safe-area-inset-bottom); pointer-events: none; }
@@ -173,7 +176,13 @@ html, body { height: var(--app-h, 100svh); }
 .hl-card .quote { font-size: 14px; color: var(--fg); flex: 1; min-width: 0; }
 .hl-card .tap { color: var(--dim); font-size: 11px; margin-top: 6px; }
 .hl-card .quote .before { color: var(--dim); }
-.hl-card .quote mark { background: rgba(255,179,71,.28); color: var(--fg); border-radius: 3px; padding: 0 2px; }
+.hl-card .quote mark {
+  display: inline-block; width: 2px; height: 1em; vertical-align: -0.15em;
+  background: var(--accent); border-radius: 2px; margin: 0 4px;
+  text-indent: -9999px; overflow: hidden;
+}
+.legend { color: var(--dim); font-size: 12px; margin: -4px 0 12px; display: flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 2px; height: 13px; background: var(--accent); border-radius: 2px; }
 
 .transcript {
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;

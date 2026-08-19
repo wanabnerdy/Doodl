@@ -28,6 +28,7 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
 
   let rec = null;
   let active = false;
+  let resumeWhenVisible = false;
   let state = 'idle';
   let lastEventAt = 0;
   let lastSampleAt = -Infinity;
@@ -49,6 +50,10 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     if (log) log(msg);
   }
 
+  // One recognition object, reused. Previously every watchdog restart constructed a
+  // new one, which seizes and releases the system audio session each time. That churn
+  // is the most plausible reason another dictation app was left unable to recover:
+  // it sees a burst of interruptions rather than one clean start and stop.
   function build() {
     const r = new SR();
     r.continuous = true;
@@ -98,12 +103,16 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     r.onend = () => {
       say('speech: ended');
       flushPending();
-      if (active) {
-        setState('starting');
-        setTimeout(start, RESTART_DELAY_MS);
-      } else {
-        setState('idle');
+      if (!active) { setState('idle'); return; }
+      // Never grab the microphone back while the user is in another app — that is
+      // exactly when they are trying to use it for something else.
+      if (document.hidden) {
+        resumeWhenVisible = true;
+        say('speech: page hidden, holding off until it is visible again');
+        return;
       }
+      setState('starting');
+      setTimeout(start, RESTART_DELAY_MS);
     };
 
     return r;
@@ -145,14 +154,27 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
 
   function start() {
     if (!active) return;
+    if (document.hidden) { resumeWhenVisible = true; return; }
+    if (!rec) rec = build();
     try {
-      rec = build();
       rec.start();
       lastEventAt = Date.now();
     } catch (err) {
+      // 'already started' is harmless. Anything else: discard this object and let the
+      // next attempt build a fresh one.
+      if (/already|invalid/i.test(err.message || '')) return;
       say('speech: start failed — ' + err.message);
+      rec = null;
       setTimeout(start, 1000);
     }
+  }
+
+  function onVisibility() {
+    if (!active || document.hidden || !resumeWhenVisible) return;
+    resumeWhenVisible = false;
+    say('speech: visible again, resuming');
+    setState('starting');
+    start();
   }
 
   return {
@@ -164,10 +186,13 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     begin() {
       if (!SR || active) return;
       active = true;
+      resumeWhenVisible = false;
       setState('starting');
+      document.addEventListener('visibilitychange', onVisibility);
       start();
       watchdog = setInterval(() => {
         if (!active) return;
+        if (document.hidden) return;
         if (Date.now() - lastEventAt > STALE_AFTER_MS) {
           say('speech: silent too long, restarting');
           lastEventAt = Date.now();
@@ -185,8 +210,10 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     // stop, keep listening briefly for that straggler, then abort and let go.
     end() {
       active = false;
+      resumeWhenVisible = false;
       clearInterval(watchdog);
       watchdog = null;
+      document.removeEventListener('visibilitychange', onVisibility);
 
       const dying = rec;
       rec = null;

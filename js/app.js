@@ -6,7 +6,7 @@ import * as store from './store.js';
 const COLORS = ['#232a33', '#2f6fd0', '#c8402f', '#1f8a53', '#8a4fbd', '#d98324'];
 const SIZES = [2.5, 4.5, 8, 14];          // css px, converted to normalised units per stroke
 const SAVE_INTERVAL_MS = 5000;
-const BUILD = 'v1.0.3';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+const BUILD = 'v1.0.4';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -78,7 +78,7 @@ async function renderHome() {
 
 /* --------------------------------------------------------- active session */
 
-async function startSession() {
+async function startSession(withMic = true) {
   t0 = Date.now();
   session = {
     id: 'S' + t0.toString(36),
@@ -95,6 +95,15 @@ async function startSession() {
   show('session');
   sizeCanvases();
   $('hlCount').textContent = '0';
+
+  if (!withMic) {
+    transcriber = null;
+    setSpeechState('off');
+    log('doodle-only session — microphone never touched');
+    await requestWakeLock();
+    saveTimer = setInterval(persist, SAVE_INTERVAL_MS);
+    return;
+  }
 
   transcriber = createTranscriber({
     now,
@@ -131,8 +140,9 @@ async function checkMicPermission() {
 
 function setSpeechState(state) {
   if (state === 'listening') micPending = false;
-  $('stateDot').className = 'dot ' + state;
+  $('stateDot').className = 'dot ' + (state === 'off' ? '' : state);
   $('stateText').textContent =
+    state === 'off' ? 'doodle only' :
     state === 'listening' ? 'listening' :
     state === 'starting' ? (micPending ? 'allow mic' : 'warming up') :
     state === 'error' ? 'no audio' : 'off';
@@ -481,7 +491,8 @@ function escapeHtml(s) {
 
 /* ------------------------------------------------------------- wiring */
 
-$('newSessionBtn').onclick = startSession;
+$('newSessionBtn').onclick = () => startSession(true);
+$('quietSessionBtn').onclick = () => startSession(false);
 $('endBtn').onclick = () => { if (confirm('Finish this session?')) endSession(); };
 $('highlightBtn').onclick = addHighlight;
 $('undoBtn').onclick = () => { S.undo(drawing); repaintInk(); };

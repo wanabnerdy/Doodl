@@ -43,6 +43,12 @@ class FakeRecognition {
   stop() { if (this.onend) this.onend(); }
 }
 globalThis.window = { SpeechRecognition: FakeRecognition };
+// speech.js checks visibility before reclaiming the microphone, so the stub needs it
+globalThis.document = {
+  hidden: false,
+  addEventListener() {},
+  removeEventListener() {}
+};
 
 const { createTranscriber } = await import('../js/speech.js');
 
@@ -143,6 +149,30 @@ check(t.utterances.length === 3, 'unfinalised trailing speech is kept, not lost'
       t.utterances.length + ' utterances');
 check(last && last.provisional && last.text.startsWith('and if that slips'),
       'and is marked provisional so the wrap-up can flag it');
+
+// Reclaiming the microphone while the user is in another app is the behaviour most
+// likely to leave a different dictation app unable to record.
+{
+  const bg = createTranscriber({ now: () => 0, onState: () => {}, log: () => {} });
+  bg.begin();
+  const inst = instance;
+  let starts = 0;
+  inst.start = () => { starts++; };
+
+  document.hidden = true;
+  inst.onend();                       // recognition dies while backgrounded
+  await new Promise(r => setTimeout(r, 500));
+  check(starts === 0, 'a backgrounded page does not grab the microphone back', starts + ' starts');
+
+  document.hidden = false;
+  bg.begin();                          // no-op, already active
+  starts = 0;
+  inst.onend();
+  await new Promise(r => setTimeout(r, 500));
+  check(starts === 1, 'and resumes once the page is visible again', starts + ' starts');
+  await bg.end();
+  document.hidden = false;
+}
 
 console.log('\n' + (FAILS.length ? FAILS.length + ' FAILING\n' : 'all checks passed\n'));
 process.exit(FAILS.length ? 1 : 0);
