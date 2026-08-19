@@ -36,7 +36,7 @@
 <body>
 
 <h1>Speech Probe 2 — scripted</h1>
-<p class="sub">The first probe let me guess about timing. This one tells you exactly when to talk and when to stay quiet, and only starts the clock once the browser says it is actually listening.</p>
+<p class="sub">Tells you exactly when to talk and when to stay quiet. Expect one or two permission prompts on the first run — tap Allow. That tap time lands inside the first measurement, so the test takes a second reading afterwards with permission already granted, which is the browser's real start-up cost.</p>
 
 <div class="stage">
   <p class="cue wait" id="cue">Ready</p>
@@ -85,9 +85,15 @@ function log(m) { lines.push('+' + (now()/1000).toFixed(2).padStart(6) + 's  ' +
                   $('log').textContent = lines.join('\n'); }
 function phaseName() { return phaseIdx < 0 ? 'pre' : SCRIPT[phaseIdx].cue; }
 
-function start() {
+async function start() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { $('cue').textContent = 'Not supported'; return; }
+  // 'prompt' means dialogs are coming and their tap time will inflate the first
+  // reading; 'granted' means it is already clear.
+  try {
+    const st = await navigator.permissions.query({ name: 'microphone' });
+    R.micPermissionBefore = st.state;
+  } catch (e) { R.micPermissionBefore = 'unknown (' + e.name + ')'; }
   $('startBtn').disabled = true;
   active = true;
   requestedAt = Date.now();
@@ -188,18 +194,57 @@ function finish() {
     R.survivedSilence = !R.lifecycle.some(l => l.event === 'end' && l.t >= silence.startT && l.t <= silence.endT)
                      && !R.errors.some(e => e.t >= silence.startT && e.t <= silence.endT && e.error !== 'no-speech');
     R.stopCalledAtMs = stopAt;
-    render();
-    $('cue').textContent = 'Done';
-    $('clock').textContent = 'Tap Copy results and paste them into the chat.';
-    $('copyBtn').disabled = false;
+    warmStart(() => {
+      render();
+      $('cue').textContent = 'Done';
+      $('cue').className = 'cue wait';
+      $('clock').textContent = 'Tap Copy results and paste them into the chat.';
+      $('copyBtn').disabled = false;
+    });
   }, 1200);
+}
+
+// The first start of the session includes however long the tester took to dismiss
+// permission dialogs. This one cannot — permission is already granted by now — so
+// the difference between the two is the human, and this number is the browser.
+function warmStart(done) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  $('cue').textContent = 'One more check';
+  $('cue').className = 'cue wait';
+  $('clock').textContent = 'Measuring start-up with permission already granted. Stay quiet.';
+
+  const requested = Date.now();
+  let settled = false;
+  const finishOnce = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(guard);
+    done();
+  };
+  const guard = setTimeout(() => { R.warmStartTimedOut = true; finishOnce(); }, 8000);
+
+  const w = new SR();
+  w.continuous = false;
+  w.interimResults = false;
+  w.lang = 'en-US';
+  w.onstart = () => {
+    R.warmStartLatencyMs = Date.now() - requested;
+    log('warm start: ' + R.warmStartLatencyMs + 'ms with permission already granted');
+    try { w.stop(); } catch (e) {}
+    finishOnce();
+  };
+  w.onerror = e => { R.warmStartError = e.error; finishOnce(); };
+  try { w.start(); } catch (err) { R.warmStartError = 'threw: ' + err.message; finishOnce(); }
 }
 
 function render() {
   const gaps = R.finals.map(f => f.sincePrevFinalMs).filter(v => v !== null);
   const worst = gaps.length ? Math.max(...gaps) : 0;
   const rows = [
-    ['Time to start listening', R.onstartLatencyMs + ' ms'],
+    ['Mic permission beforehand', R.micPermissionBefore],
+    ['First start (includes your taps)', R.onstartLatencyMs + ' ms'],
+    ['Warm start (permission granted)', R.warmStartTimedOut ? 'timed out'
+        : R.warmStartError ? R.warmStartError : R.warmStartLatencyMs + ' ms'],
     ['Final results', R.finals.length],
     ['Longest wait between finals', (worst / 1000).toFixed(1) + ' s'],
     ['Finals withheld until stop', R.finalsAfterStop],

@@ -16,6 +16,7 @@ let t0 = 0;
 let wakeLock = null;
 let saveTimer = null;
 let livePainted = 0;
+let micPending = false;
 let cssW = 0, cssH = 0;
 let colour = COLORS[0];
 let sizePx = SIZES[1];
@@ -100,6 +101,7 @@ async function startSession() {
     setSpeechState('error');
     log('speech recognition unavailable — doodling still works');
   } else {
+    await checkMicPermission();
     transcriber.begin();
   }
 
@@ -108,11 +110,25 @@ async function startSession() {
   log('session started ' + session.id);
 }
 
+// On a first run iOS puts up permission dialogs, and nothing happens until they are
+// dismissed. Saying "warming up" there would blame the browser for waiting on a tap.
+async function checkMicPermission() {
+  try {
+    const st = await navigator.permissions.query({ name: 'microphone' });
+    micPending = st.state === 'prompt';
+    log('mic permission: ' + st.state);
+  } catch (e) {
+    micPending = false;
+    log('mic permission unknown: ' + e.name);
+  }
+}
+
 function setSpeechState(state) {
+  if (state === 'listening') micPending = false;
   $('stateDot').className = 'dot ' + state;
   $('stateText').textContent =
     state === 'listening' ? 'listening' :
-    state === 'starting' ? 'warming up' :
+    state === 'starting' ? (micPending ? 'allow mic' : 'warming up') :
     state === 'error' ? 'no audio' : 'off';
 }
 
