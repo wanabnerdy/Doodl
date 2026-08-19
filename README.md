@@ -1,24 +1,52 @@
 # Doodl
 
 A meeting companion. You doodle full-screen; it transcribes in the background. Tap the
-highlight button and it captures the transcript timestamp, a snapshot of the doodle at that
-instant, and an entry in a highlight reel.
+highlight button and it captures the moment three ways: a timestamp in the transcript,
+the doodle exactly as it stood at that instant, and an entry in the highlight reel.
 
 Everything runs locally in the browser — no server, no API keys, no cost.
 
 ## Status
 
-Pre-build. The only thing here is a device probe, because every meaningful architecture
-decision depends on what the target phone actually supports.
+**Phase 1 is built.** Canvas, background transcription, highlights, wrap-up screen,
+local session history.
+
+Phase 2 (audio recording) and Phase 3 (stroke-synced playback) are not started, but
+Phase 1 stores what Phase 3 needs: every stroke is a timestamped vector, so playback is
+a matter of replaying data that is already there.
 
 ## Layout
 
-- `index.html` — landing page (becomes the app)
-- `probe/` — device capability probe: drawing pressure, speech recognition endurance,
-  audio recording, whether the two can run simultaneously, storage quota, wake lock
+- `index.html` — the app shell: home, session, wrap-up
+- `js/strokes.js` — stroke model and rendering. Vectors with timestamps, never bitmaps
+- `js/speech.js` — transcription, highlight anchoring, restart watchdog
+- `js/store.js` — IndexedDB session persistence
+- `js/backgrounds.js` — procedurally drawn paper templates
+- `js/app.js` — screens, canvas input, export
+- `probe/` — device capability probes (see below)
+- `test/smoke.mjs` — Playwright run through the whole flow
+
+## Why it is built the way it is
+
+The design follows what `probe/` measured on the target device (iPhone, iOS 18.7,
+Safari 26.6), not what the APIs advertise:
+
+| Measured | Consequence |
+|---|---|
+| Pointer pressure is flat zero on touch | Line weight comes from stroke speed instead |
+| Up to 6 coalesced points per pointer event | Used for smooth lines rather than visible corners |
+| A 250-char final arrived *after* recognition was stopped | Highlights anchor to interim samples, never to finals |
+| First `onstart` took 4.5 s; later ones instant | A distinct "warming up" state, so the UI never lies about listening |
+| ~39 GB quota, IndexedDB blobs fine | IndexedDB over localStorage, whose ~5 MB cap is the real limit |
+| Recording and transcription coexisted | Phase 2 is not blocked on microphone contention |
 
 ## Running it
 
-There is no build step and no dependencies — it is plain HTML/CSS/JS, opened directly.
-It must be served over HTTPS, though: microphone and speech recognition are both blocked
-on insecure origins. GitHub Pages (see `.github/workflows/pages.yml`) is enough.
+No build step and no dependencies — plain HTML/CSS/ES modules. It must be served over
+HTTPS, though: microphone and speech recognition are both blocked on insecure origins.
+GitHub Pages (`.github/workflows/pages.yml`) handles that.
+
+The smoke test needs a static server and Playwright:
+
+    npx http-server -p 8080 -c-1 .
+    node test/smoke.mjs
