@@ -25,7 +25,7 @@
   .verdict button.good { border-color:var(--ok); color:var(--ok); }
   .verdict button.bad  { border-color:var(--bad); color:var(--bad); }
   .state { font-size:13px; margin-top:10px; color:var(--dim); }
-  .state.done { color:var(--fg); }
+  .state.done { color:var(--ok); font-weight:600; }
   .tag { display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase;
          letter-spacing:.4px; padding:3px 8px; border-radius:99px; margin-left:6px; }
   .tag.good { background:var(--ok); color:#0f1115; }
@@ -126,7 +126,8 @@ function release(why) {
   try { if (recognition) { recognition.onend = recognition.onresult = null; recognition.abort(); } } catch (e) {}
   try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch (e) {}
   if (R.tests[key]) R.tests[key].releasedEarlyBy = why;
-  state(key, 'Microphone released (' + why + '). Now try your dictation app.', true);
+  state(key, '\u2713 MICROPHONE RELEASED (' + why + ') — try your dictation app, then ' +
+             'come back and tap an answer below.', true);
   $('v-' + key.toLowerCase()).style.display = 'flex';
   $('btn-' + key.toLowerCase()).disabled = true;
 }
@@ -164,7 +165,8 @@ function state(k, msg, done) {
 function finished(k, detail) {
   R.tests[k] = Object.assign({ ran: true, bluetooth: R.bluetooth }, detail);
   captureDevices(k);
-  state(k, 'Done — now switch to your dictation app and try it, then come back.', true);
+  state(k, '\u2713 MICROPHONE RELEASED — now switch to your dictation app, try to talk, ' +
+           'then come back and tap an answer below.', true);
   $('v-' + k.toLowerCase()).style.display = 'flex';
   $('btn-' + k.toLowerCase()).disabled = true;
 }
