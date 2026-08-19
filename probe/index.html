@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Doodl — Device Probe</title>
+<style>
+  :root {
+    --bg: #0f1115; --card: #181b22; --line: #262b36;
+    --fg: #e7eaf0; --dim: #949cad;
+    --ok: #46d17f; --bad: #ff6b6b; --warn: #f2c14e; --idle: #5b6373;
+    --accent: #6ea8fe;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 16px 14px 60px; background: var(--bg); color: var(--fg);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--dim); font-size: 13px; margin: 0 0 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .card h2 { font-size: 15px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
+  .chip { font-size: 11px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase;
+          padding: 3px 8px; border-radius: 999px; background: var(--idle); color: #0f1115; margin-left: auto; }
+  .chip.ok { background: var(--ok); } .chip.bad { background: var(--bad); }
+  .chip.warn { background: var(--warn); } .chip.run { background: var(--accent); }
+  .detail { color: var(--dim); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  button {
+    appearance: none; border: 1px solid var(--line); background: #222735; color: var(--fg);
+    font: 600 15px/1 inherit; padding: 14px 16px; border-radius: 10px; width: 100%;
+    margin-top: 10px; touch-action: manipulation;
+  }
+  button.primary { background: var(--accent); color: #0f1115; border-color: var(--accent); }
+  button:disabled { opacity: .45; }
+  .row { display: flex; gap: 8px; }
+  .row button { margin-top: 10px; }
+  select { width: 100%; padding: 12px; margin-top: 10px; border-radius: 10px;
+           background: #222735; color: var(--fg); border: 1px solid var(--line); font-size: 15px; }
+  #pad { width: 100%; height: 150px; background: #10131a; border: 1px dashed var(--line);
+         border-radius: 10px; margin-top: 10px; touch-action: none; display: block; }
+  pre { background: #10131a; border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+        font-size: 11px; max-height: 260px; overflow: auto; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<h1>Doodl — Device Probe</h1>
+<p class="sub">Checks whether your phone can actually do the things the app needs. Run every test, then tap <b>Copy results</b> at the bottom and paste them back into the chat.</p>
+
+<div class="card" id="c-env"><h2>Environment<span class="chip" id="s-env">…</span></h2><div class="detail" id="d-env"></div></div>
+
+<div class="card" id="c-draw">
+  <h2>Drawing &amp; pressure<span class="chip" id="s-draw">idle</span></h2>
+  <div class="detail" id="d-draw">Scribble in the box below — with a finger, and with a stylus if you have one.</div>
+  <canvas id="pad"></canvas>
+  <button onclick="resetPad()">Clear pad</button>
+</div>
+
+<div class="card" id="c-speech">
+  <h2>Speech recognition<span class="chip" id="s-speech">idle</span></h2>
+  <div class="detail" id="d-speech">The whole app hangs on this one. Start it, then talk normally for the full duration.</div>
+  <select id="speechDur">
+    <option value="20">20 seconds — quick check</option>
+    <option value="60">60 seconds — does it survive pauses?</option>
+    <option value="180">3 minutes — meeting-realistic</option>
+  </select>
+  <button class="primary" id="b-speech" onclick="testSpeech()">Start speech test</button>
+  <button id="b-speech-stop" onclick="stopSpeech()" disabled>Stop early</button>
+</div>
+
+<div class="card" id="c-rec">
+  <h2>Audio recording<span class="chip" id="s-rec">idle</span></h2>
+  <div class="detail" id="d-rec">Records 4 seconds of mic audio to memory. Nothing is uploaded.</div>
+  <button onclick="testRecorder()">Test recorder (4s)</button>
+</div>
+
+<div class="card" id="c-combo">
+  <h2>Both at once<span class="chip" id="s-combo">idle</span></h2>
+  <div class="detail" id="d-combo">Phase 2 needs recording and transcription running together. This is where iOS often objects.</div>
+  <button onclick="testCombo()">Test combined (15s)</button>
+</div>
+
+<div class="card" id="c-store"><h2>Storage<span class="chip" id="s-store">…</span></h2><div class="detail" id="d-store"></div></div>
+<div class="card" id="c-wake"><h2>Screen wake lock<span class="chip" id="s-wake">idle</span></h2><div class="detail" id="d-wake">Keeps the screen alive mid-meeting.</div><button onclick="testWake()">Test wake lock</button></div>
+
+<div class="card">
+  <h2>Event log</h2>
+  <pre id="log"></pre>
+</div>
+
+<button class="primary" onclick="copyResults()">Copy results</button>
+<div class="detail" id="copystate" style="margin-top:8px"></div>
+<pre id="dump" style="display:none"></pre>
+
+<script>
+const R = {};                       // results collected for the report
+const t0 = Date.now();
+const $ = id => document.getElementById(id);
+const logLines = [];
+
+function log(msg) {
+  const line = '+' + String((Date.now() - t0) / 1000).padStart(6, ' ') + 's  ' + msg;
+  logLines.push(line);
+  $('log').textContent = logLines.join('\n');
+  $('log').scrollTop = $('log').scrollHeight;
+}
+function set(key, status, text) {
+  const chip = $('s-' + key), det = $('d-' + key);
+  if (chip) { chip.textContent = status; chip.className = 'chip ' + (
+    status === 'pass' ? 'ok' : status === 'fail' ? 'bad' :
+    status === 'partial' ? 'warn' : status === 'running' ? 'run' : ''); }
+  if (det && text !== undefined) det.textContent = text;
+}
+
+/* ---------- environment ---------- */
+(function env() {
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  R.env = {
+    ua: navigator.userAgent,
+    secureContext: window.isSecureContext,
+    origin: location.origin,
+    standalonePWA: standalone,
+    screen: screen.width + 'x' + screen.height + ' @' + window.devicePixelRatio + 'x',
+    viewport: window.innerWidth + 'x' + window.innerHeight,
+    touchPoints: navigator.maxTouchPoints,
+    apis: {
+      SpeechRecognition: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
+      MediaRecorder: typeof MediaRecorder !== 'undefined',
+      getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+      indexedDB: !!window.indexedDB,
+      wakeLock: !!navigator.wakeLock,
+      pointerEvents: !!window.PointerEvent,
+      storageEstimate: !!(navigator.storage && navigator.storage.estimate)
+    }
+  };
+  const missing = Object.entries(R.env.apis).filter(([, v]) => !v).map(([k]) => k);
+  set('env', missing.length ? 'partial' : 'pass',
+    'Secure context (HTTPS): ' + R.env.secureContext +
+    '\nInstalled as PWA: ' + standalone +
+    '\nScreen: ' + R.env.screen + '   Touch points: ' + R.env.touchPoints +
+    '\nAPIs present: ' + Object.entries(R.env.apis).filter(([, v]) => v).map(([k]) => k).join(', ') +
+    (missing.length ? '\nMISSING: ' + missing.join(', ') : '\nNothing missing.'));
+  log('env captured; missing APIs: ' + (missing.join(',') || 'none'));
+})();
+
+/* ---------- drawing / pressure ---------- */
+const pad = $('pad'), pctx = pad.getContext('2d');
+let drawState = { strokes: 0, points: 0, maxPressure: 0, pressureVaried: false,
+                  pressures: new Set(), types: new Set(), coalescedMax: 0, tilt: false };
+function sizePad() {
+  const r = pad.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  pad.width = r.width * dpr; pad.height = r.height * dpr;
+  pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  pctx.lineCap = pctx.lineJoin = 'round'; pctx.strokeStyle = '#6ea8fe';
+}
+sizePad(); window.addEventListener('resize', sizePad);
+function resetPad() { sizePad(); pctx.clearRect(0, 0, pad.width, pad.height); }
+
+let drawing = false, last = null;
+pad.addEventListener('pointerdown', e => {
+  drawing = true; last = e; drawState.strokes++;
+  pad.setPointerCapture(e.pointerId); record(e); e.preventDefault();
+});
+pad.addEventListener('pointermove', e => {
+  if (!drawing) return;
+  const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  drawState.coalescedMax = Math.max(drawState.coalescedMax, events.length);
+  for (const ev of events) { drawSeg(last, ev); record(ev); last = ev; }
+  e.preventDefault();
+}, { passive: false });
+['pointerup', 'pointercancel'].forEach(t => pad.addEventListener(t, () => { drawing = false; last = null; }));
+
+function record(e) {
+  drawState.points++;
+  drawState.types.add(e.pointerType);
+  drawState.pressures.add(Math.round(e.pressure * 100) / 100);
+  drawState.maxPressure = Math.max(drawState.maxPressure, e.pressure);
+  if (e.tiltX || e.tiltY) drawState.tilt = true;
+  drawState.pressureVaried = drawState.pressures.size > 2;
+  reportDraw();
+}
+function drawSeg(a, b) {
+  if (!a) return;
+  const r = pad.getBoundingClientRect();
+  pctx.lineWidth = 1 + (b.pressure || 0.5) * 14;
+  pctx.beginPath();
+  pctx.moveTo(a.clientX - r.left, a.clientY - r.top);
+  pctx.lineTo(b.clientX - r.left, b.clientY - r.top);
+  pctx.stroke();
+}
+function reportDraw() {
+  R.draw = { strokes: drawState.strokes, points: drawState.points,
+             pointerTypes: [...drawState.types], maxPressure: drawState.maxPressure,
+             distinctPressures: drawState.pressures.size, realPressure: drawState.pressureVaried,
+             maxCoalescedPerEvent: drawState.coalescedMax, tiltReported: drawState.tilt };
+  set('draw', drawState.points ? (drawState.pressureVaried ? 'pass' : 'partial') : 'idle',
+    'Strokes: ' + drawState.strokes + '   Points: ' + drawState.points +
+    '\nInput types seen: ' + [...drawState.types].join(', ') +
+    '\nMax pressure: ' + drawState.maxPressure.toFixed(2) +
+    '   Distinct values: ' + drawState.pressures.size +
+    '\nReal pressure sensitivity: ' + (drawState.pressureVaried ? 'YES' : 'no — flat/simulated') +
+    '\nCoalesced points per event (higher = smoother lines): ' + drawState.coalescedMax +
+    '\nTilt data: ' + (drawState.tilt ? 'yes' : 'no'));
+}
+
+/* ---------- speech recognition ---------- */
+let rec = null, speechTimer = null, speechActive = false;
+const speech = { supported: false, restarts: 0, finals: 0, interims: 0, errors: [],
+                 chars: 0, firstResultMs: null, lastResultMs: null, endedEarly: false,
+                 durationRequested: 0, sample: '' };
+
+function testSpeech(durationOverride, silent) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { set('speech', 'fail', 'SpeechRecognition is not available in this browser at all. This is a hard blocker for the core concept here.'); R.speech = { supported: false }; return; }
+  speech.supported = true;
+  const dur = durationOverride || parseInt($('speechDur').value, 10);
+  speech.durationRequested = dur;
+  $('b-speech').disabled = true; $('b-speech-stop').disabled = false;
+  speechActive = true;
+  const started = Date.now();
+  log('speech: starting, target ' + dur + 's');
+
+  const start = () => {
+    rec = new SR();
+    rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+    rec.onstart = () => log('speech: onstart');
+    rec.onresult = e => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const txt = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          speech.finals++; speech.chars += txt.length;
+          if (speech.sample.length < 220) speech.sample += txt + ' ';
+          log('speech: final "' + txt.trim().slice(0, 48) + '"');
+        } else speech.interims++;
+      }
+      const el = Date.now() - started;
+      if (speech.firstResultMs === null) speech.firstResultMs = el;
+      speech.lastResultMs = el;
+      reportSpeech(dur);
+    };
+    rec.onerror = e => { speech.errors.push(e.error); log('speech: ERROR ' + e.error); reportSpeech(dur); };
+    rec.onend = () => {
+      log('speech: onend at +' + ((Date.now() - started) / 1000).toFixed(1) + 's');
+      if (speechActive && Date.now() - started < dur * 1000) {
+        speech.restarts++; speech.endedEarly = true;
+        setTimeout(() => { if (speechActive) { try { rec.start(); } catch (err) { log('speech: restart failed ' + err.message); } } }, 250);
+      }
+      reportSpeech(dur);
+    };
+    try { rec.start(); } catch (err) { speech.errors.push('start:' + err.message); log('speech: start threw ' + err.message); }
+  };
+  start();
+  set('speech', 'running', 'Listening… talk normally. Pause a few times — that is what usually breaks it.');
+  speechTimer = setTimeout(() => stopSpeech(silent), dur * 1000);
+}
+function stopSpeech(silent) {
+  speechActive = false; clearTimeout(speechTimer);
+  if (rec) { try { rec.stop(); } catch (e) {} }
+  $('b-speech').disabled = false; $('b-speech-stop').disabled = true;
+  log('speech: stopped by test');
+  if (!silent) reportSpeech(speech.durationRequested, true);
+}
+function reportSpeech(dur, done) {
+  R.speech = Object.assign({}, speech);
+  const healthy = speech.finals > 0 && speech.errors.filter(e => e !== 'no-speech').length === 0;
+  set('speech', done ? (healthy ? (speech.restarts > 3 ? 'partial' : 'pass') : 'fail') : 'running',
+    'Final phrases: ' + speech.finals + '   Interim updates: ' + speech.interims +
+    '\nCharacters transcribed: ' + speech.chars +
+    '\nAuto-restarts needed: ' + speech.restarts + (speech.restarts ? '  (it keeps cutting out — the app must babysit it)' : '') +
+    '\nErrors: ' + (speech.errors.join(', ') || 'none') +
+    '\nFirst result at: ' + (speech.firstResultMs === null ? 'never' : (speech.firstResultMs / 1000).toFixed(1) + 's') +
+    '\nLast result at: ' + (speech.lastResultMs === null ? 'never' : (speech.lastResultMs / 1000).toFixed(1) + 's of ' + dur + 's' ) +
+    (speech.sample ? '\nSample: "' + speech.sample.trim() + '"' : ''));
+}
+
+/* ---------- audio recording ---------- */
+async function testRecorder() {
+  set('rec', 'running', 'Requesting microphone…');
+  const out = { mimeTypes: {}, bytes: 0 };
+  ['audio/webm', 'audio/webm;codecs=opus', 'audio/mp4', 'audio/mp4;codecs=mp4a.40.2', 'audio/ogg']
+    .forEach(m => { out.mimeTypes[m] = (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported) ? MediaRecorder.isTypeSupported(m) : false; });
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    log('rec: mic granted');
+    const chosen = Object.keys(out.mimeTypes).find(m => out.mimeTypes[m]);
+    const mr = new MediaRecorder(stream, chosen ? { mimeType: chosen } : undefined);
+    out.usedMimeType = mr.mimeType;
+    const chunks = [];
+    mr.ondataavailable = e => chunks.push(e.data);
+    mr.onstop = () => {
+      const blob = new Blob(chunks, { type: mr.mimeType });
+      out.bytes = blob.size;
+      out.bytesPerMinute = Math.round(blob.size / 4 * 60);
+      stream.getTracks().forEach(t => t.stop());
+      R.recorder = out;
+      set('rec', blob.size > 1000 ? 'pass' : 'fail',
+        'Recorded ' + blob.size.toLocaleString() + ' bytes in 4s using ' + mr.mimeType +
+        '\nProjected: ~' + (out.bytesPerMinute / 1048576).toFixed(1) + ' MB per minute, ' +
+        (out.bytesPerMinute * 60 / 1048576).toFixed(0) + ' MB per hour of meeting' +
+        '\nSupported formats: ' + Object.entries(out.mimeTypes).filter(([, v]) => v).map(([k]) => k).join(', '));
+      log('rec: captured ' + blob.size + ' bytes as ' + mr.mimeType);
+    };
+    mr.start();
+    setTimeout(() => mr.stop(), 4000);
+  } catch (e) {
+    out.error = e.name + ': ' + e.message;
+    R.recorder = out;
+    set('rec', 'fail', 'Microphone failed — ' + out.error);
+    log('rec: FAILED ' + out.error);
+  }
+}
+
+/* ---------- both at once ---------- */
+async function testCombo() {
+  set('combo', 'running', 'Starting recorder and transcription together…');
+  const out = { recorderOk: false, speechFinalsDuringCombo: 0, errors: [] };
+  const before = speech.finals;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mr = new MediaRecorder(stream);
+    const chunks = [];
+    mr.ondataavailable = e => chunks.push(e.data);
+    mr.start();
+    log('combo: recorder started');
+    testSpeech(15, true);
+    setTimeout(() => {
+      mr.stop(); stopSpeech(true);
+      setTimeout(() => {
+        const blob = new Blob(chunks);
+        out.recorderOk = blob.size > 1000;
+        out.recordedBytes = blob.size;
+        out.speechFinalsDuringCombo = speech.finals - before;
+        out.errors = speech.errors.slice();
+        stream.getTracks().forEach(t => t.stop());
+        R.combo = out;
+        const both = out.recorderOk && out.speechFinalsDuringCombo > 0;
+        set('combo', both ? 'pass' : 'fail',
+          'Recorder captured: ' + out.recordedBytes.toLocaleString() + ' bytes' +
+          '\nPhrases transcribed while recording: ' + out.speechFinalsDuringCombo +
+          '\nVerdict: ' + (both ? 'both can run together — Phase 2 is clear' :
+                          'they fight over the microphone — Phase 2 needs a different approach'));
+        log('combo: recorder=' + out.recordedBytes + 'B speechFinals=' + out.speechFinalsDuringCombo);
+      }, 600);
+    }, 15000);
+  } catch (e) {
+    out.errors.push(e.name + ': ' + e.message);
+    R.combo = out;
+    set('combo', 'fail', 'Failed — ' + e.message);
+  }
+}
+
+/* ---------- storage ---------- */
+(async function storage() {
+  const out = {};
+  try {
+    const est = await navigator.storage.estimate();
+    out.quotaMB = Math.round(est.quota / 1048576);
+    out.usedMB = Math.round(est.usage / 1048576);
+  } catch (e) { out.estimateError = String(e); }
+  try {
+    const db = await new Promise((res, rej) => {
+      const r = indexedDB.open('doodl-probe', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('t');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    const blob = new Blob([new Uint8Array(2 * 1048576)]);
+    await new Promise((res, rej) => {
+      const tx = db.transaction('t', 'readwrite');
+      tx.objectStore('t').put(blob, 'big');
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+    const back = await new Promise((res, rej) => {
+      const tx = db.transaction('t', 'readonly');
+      const g = tx.objectStore('t').get('big');
+      g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error);
+    });
+    out.indexedDBBlobRoundTrip = back && back.size === 2 * 1048576;
+    db.close(); indexedDB.deleteDatabase('doodl-probe');
+  } catch (e) { out.indexedDBError = String(e); }
+  try {
+    localStorage.setItem('doodl-probe', 'x'); localStorage.removeItem('doodl-probe');
+    out.localStorage = true;
+  } catch (e) { out.localStorage = false; }
+  out.persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : null;
+  R.storage = out;
+  set('store', out.indexedDBBlobRoundTrip ? 'pass' : 'partial',
+    'Storage quota: ~' + out.quotaMB + ' MB   (currently used: ' + out.usedMB + ' MB)' +
+    '\nIndexedDB 2 MB blob round-trip: ' + (out.indexedDBBlobRoundTrip ? 'OK' : 'FAILED — ' + (out.indexedDBError || '')) +
+    '\nlocalStorage available: ' + out.localStorage + '  (capped near 5 MB — too small for snapshots)' +
+    '\nStorage marked persistent: ' + out.persisted);
+  log('storage: quota ' + out.quotaMB + 'MB, idb blob ' + out.indexedDBBlobRoundTrip);
+})();
+
+/* ---------- wake lock ---------- */
+async function testWake() {
+  if (!navigator.wakeLock) { R.wakeLock = { supported: false }; set('wake', 'fail', 'Wake Lock API not available — the screen will sleep mid-meeting unless we work around it.'); return; }
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    R.wakeLock = { supported: true, acquired: true };
+    set('wake', 'pass', 'Wake lock acquired and released. The screen can be kept awake during a session.');
+    log('wake: acquired');
+    setTimeout(() => lock.release(), 1500);
+  } catch (e) {
+    R.wakeLock = { supported: true, acquired: false, error: String(e) };
+    set('wake', 'fail', 'Wake Lock request rejected — ' + e.message);
+  }
+}
+
+/* ---------- report ---------- */
+function copyResults() {
+  const report = '## Doodl device probe\n```json\n' +
+    JSON.stringify(R, null, 2) + '\n```\n### Event log\n```\n' + logLines.join('\n') + '\n```';
+  $('dump').style.display = 'block';
+  $('dump').textContent = report;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(report)
+      .then(() => { $('copystate').textContent = 'Copied. Paste it into the chat.'; })
+      .catch(() => { $('copystate').textContent = 'Could not copy automatically — select the text below and copy it.'; });
+  } else {
+    $('copystate').textContent = 'Select the text below and copy it.';
+  }
+}
+</script>
+</body>
+</html>
