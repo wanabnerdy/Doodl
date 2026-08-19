@@ -220,5 +220,28 @@ check(last && last.provisional && last.text.startsWith('and if that slips'),
   document.hidden = false;
 }
 
+// Coverage is what tells a quiet room apart from a deaf app, so the arithmetic has
+// to be right: listening time counted, and the deaf windows reported.
+{
+  const clock2 = { v: 0 };
+  const cov = createTranscriber({ now: () => clock2.v, onState: () => {}, log: () => {} });
+  cov.begin();
+  const ci = instance;
+
+  clock2.v = 0;    ci.onstart();          // listening 0 → 10s
+  clock2.v = 10000; ci.onend();           // dies, restarts after the delay
+  clock2.v = 14000; instance.onstart();   // 4s deaf, listening again 14 → 30s
+  clock2.v = 30000;
+  const c = cov.coverage(32000);
+
+  check(c.listeningMs === 26000, 'listening time excludes the restart window',
+        c.listeningMs + ' ms');
+  check(c.gaps.length === 2, 'both deaf windows reported', c.gaps.length + ' gaps');
+  check(c.gaps[0].from === 10000 && c.gaps[0].to === 14000,
+        'the restart gap is located correctly');
+  check(c.gaps[1].from === 30000, 'and the tail after recognition stopped');
+  await cov.end();
+}
+
 console.log('\n' + (FAILS.length ? FAILS.length + ' FAILING\n' : 'all checks passed\n'));
 process.exit(FAILS.length ? 1 : 0);

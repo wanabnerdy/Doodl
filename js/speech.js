@@ -35,6 +35,11 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
   // particular recognition object, so whether a repair is owed cannot be decided by
   // looking at whether one is currently running.
   let routeDirty = false;
+  // When recognition was genuinely listening. Every restart costs the delay plus
+  // start-up time, and words spoken in those windows are simply never heard. Without
+  // measuring it there is no way to tell a sparse transcript from a lossy one.
+  const segments = [];
+  let segmentStart = null;
   let state = 'idle';
   let lastEventAt = 0;
   let lastSampleAt = -Infinity;
@@ -81,6 +86,12 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     }
   }
 
+  function closeSegment() {
+    if (segmentStart === null) return;
+    segments.push({ from: segmentStart, to: now() });
+    segmentStart = null;
+  }
+
   function newPending() {
     return { startT: null, samples: [], text: '' };
   }
@@ -105,7 +116,11 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     r.interimResults = true;
     r.lang = 'en-US';
 
-    r.onstart = () => { setState('listening'); say('speech: listening'); };
+    r.onstart = () => {
+      segmentStart = now();
+      setState('listening');
+      say('speech: listening');
+    };
 
     r.onresult = e => {
       lastEventAt = Date.now();
@@ -147,6 +162,7 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
 
     r.onend = () => {
       say('speech: ended');
+      closeSegment();
       flushPending();
       if (!active) { setState('idle'); return; }
       // Never grab the microphone back while the user is in another app — that is
@@ -228,6 +244,7 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
         rec = null;
         dying.onend = dying.onresult = dying.onerror = dying.onstart = null;
         try { dying.abort(); } catch (e) { /* nothing to abort */ }
+        closeSegment();
         flushPending();
         say('speech: page hidden — microphone released');
       }
@@ -302,6 +319,7 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
         setTimeout(async () => {
           dying.onresult = dying.onerror = dying.onend = dying.onstart = null;
           try { dying.abort(); } catch (e) { /* nothing left to abort */ }
+          closeSegment();
           flushPending();
           say('speech: microphone released');
           // Deliberately not awaited: the transcript is complete at this point, so the
@@ -311,6 +329,25 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
           resolve();
         }, RELEASE_GRACE_MS);
       });
+    },
+
+    // How much of the session was actually being listened to, and where the deaf
+    // spots were. Gaps under a second are the ordinary cost of a restart and would
+    // only be noise here.
+    coverage(totalMs) {
+      // Include a segment still in progress. Callers happen to ask after teardown, but
+      // a listening-time figure that omits the listening happening right now is wrong.
+      const open = segmentStart === null ? [] : [{ from: segmentStart, to: now() }];
+      const heard = segments.concat(open).sort((a, b) => a.from - b.from);
+      const listeningMs = heard.reduce((n, s2) => n + (s2.to - s2.from), 0);
+      const gaps = [];
+      let cursor = 0;
+      for (const seg of heard) {
+        if (seg.from - cursor >= 1000) gaps.push({ from: cursor, to: seg.from });
+        cursor = Math.max(cursor, seg.to);
+      }
+      if (totalMs - cursor >= 1000) gaps.push({ from: cursor, to: totalMs });
+      return { listeningMs, totalMs, gaps };
     },
 
     // Where in the transcript was this moment? Returns the utterance in play at time T

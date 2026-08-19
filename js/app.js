@@ -6,7 +6,7 @@ import * as store from './store.js';
 const COLORS = ['#232a33', '#2f6fd0', '#c8402f', '#1f8a53', '#8a4fbd', '#d98324'];
 const SIZES = [2.5, 4.5, 8, 14];          // css px, converted to normalised units per stroke
 const SAVE_INTERVAL_MS = 5000;
-const BUILD = 'v1.0.9';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+const BUILD = 'v1.1.0';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -151,9 +151,11 @@ function setSpeechState(state) {
 async function endSession() {
   clearInterval(saveTimer);
   saveTimer = null;
+  const elapsed = now();
   if (transcriber) {
     await transcriber.end();
     for (const h of session.highlights) h.anchor = transcriber.anchorAt(h.t);
+    session.coverage = transcriber.coverage(elapsed);
   }
   releaseWakeLock();
   session.endedAt = Date.now();
@@ -280,6 +282,23 @@ function renderWrap(s) {
   $('wrapTitle').value = s.title || '';
   $('wrapTitle').oninput = () => { s.title = $('wrapTitle').value; store.saveSession(s); };
 
+  // Says plainly how much of the session was heard. A thin transcript could mean a
+  // quiet room or a deaf app, and those need telling apart.
+  const cov = s.coverage;
+  const covEl = $('coverage');
+  if (cov && cov.totalMs > 0) {
+    const pct = Math.round(cov.listeningMs / cov.totalMs * 100);
+    const lost = cov.gaps.reduce((n, g) => n + (g.to - g.from), 0);
+    covEl.style.display = 'block';
+    covEl.className = 'coverage' + (pct < 90 ? ' poor' : '');
+    covEl.textContent = 'Listening ' + clock(cov.listeningMs) + ' of ' + clock(cov.totalMs) +
+      ' (' + pct + '%)' +
+      (cov.gaps.length ? '  ·  ' + cov.gaps.length + ' gap' + (cov.gaps.length === 1 ? '' : 's') +
+        ' totalling ' + clock(lost) : '  ·  no gaps');
+  } else {
+    covEl.style.display = 'none';
+  }
+
   const byId = new Map((s.utterances || []).map(u => [u.id, u]));
   const hlBox = $('hlList');
   hlBox.innerHTML = '';
@@ -320,7 +339,15 @@ function renderWrap(s) {
   if (!(s.utterances || []).length) {
     box.innerHTML = '<p class="empty" style="margin:0">Nothing was transcribed.</p>';
   } else {
-    box.innerHTML = s.utterances.map(u => {
+    const items = s.utterances.map(u => ({ t: u.startT, kind: 'said', u }));
+    for (const g of (cov ? cov.gaps : [])) items.push({ t: g.from, kind: 'gap', g });
+    items.sort((a2, b2) => a2.t - b2.t);
+
+    box.innerHTML = items.map(item => {
+      if (item.kind === 'gap') {
+        return '<p class="gap">not listening for ' + clock(item.g.to - item.g.from) + '</p>';
+      }
+      const u = item.u;
       const hit = s.highlights.some(h => h.anchor && h.anchor.utteranceId === u.id);
       return '<p class="' + (hit ? 'has-hl' : '') + '"><b>' + clock(u.startT) + '</b> ' +
              escapeHtml(u.text) + (u.provisional ? ' <i>(partial)</i>' : '') + '</p>';

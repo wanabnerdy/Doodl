@@ -161,6 +161,16 @@ html, body {
 
 /* ---------- wrap-up ---------- */
 
+.coverage {
+  font-size: 13px; color: var(--dim); margin: -6px 0 16px;
+  border-left: 2px solid var(--line); padding-left: 10px;
+}
+.coverage.poor { color: var(--warn); border-color: var(--warn); }
+.transcript p.gap {
+  color: var(--warn); font-size: 12px; font-style: italic;
+  border-left: 2px dashed var(--warn); padding-left: 10px; margin: 12px 0;
+}
+
 .hl-card {
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
   padding: 12px; margin-bottom: 12px;
