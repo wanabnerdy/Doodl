@@ -111,7 +111,7 @@ check(t.anchorAt(500) === null, 'a highlight before any speech has no anchor');
 clock = 69951;
 fire('and if that slips again we lose the whole', false);
 clock = 70259;
-t.end();
+await t.end();   // async now: it waits briefly for a trailing final, then frees the mic
 const last = t.utterances[t.utterances.length - 1];
 check(t.utterances.length === 3, 'unfinalised trailing speech is kept, not lost',
       t.utterances.length + ' utterances');

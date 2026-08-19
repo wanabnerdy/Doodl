@@ -6,7 +6,7 @@ import * as store from './store.js';
 const COLORS = ['#232a33', '#2f6fd0', '#c8402f', '#1f8a53', '#8a4fbd', '#d98324'];
 const SIZES = [2.5, 4.5, 8, 14];          // css px, converted to normalised units per stroke
 const SAVE_INTERVAL_MS = 5000;
-const BUILD = 'v1.0.1';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+const BUILD = 'v1.0.2';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -136,7 +136,7 @@ function setSpeechState(state) {
 async function endSession() {
   clearInterval(saveTimer);
   saveTimer = null;
-  if (transcriber) transcriber.end();
+  if (transcriber) await transcriber.end();
   releaseWakeLock();
   session.endedAt = Date.now();
   await persist();
@@ -476,7 +476,7 @@ $('newSessionBtn').onclick = startSession;
 $('endBtn').onclick = () => { if (confirm('Finish this session?')) endSession(); };
 $('highlightBtn').onclick = addHighlight;
 $('undoBtn').onclick = () => { S.undo(drawing); repaintInk(); };
-$('clearBtn').onclick = () => { if (confirm('Clear the whole page?')) { S.clear(drawing); repaintInk(); } };
+$('clearBtn').onclick = () => { if (confirm('Clear the whole page?')) { S.clear(drawing); repaintInk(); closeTools(); } };
 $('toolsBtn').onclick = () => $('tools').classList.toggle('open');
 $('toolsDone').onclick = closeTools;
 $('homeBtn').onclick = goHome;
@@ -484,6 +484,10 @@ $('debugToggle').onclick = () => $('debug').classList.toggle('open');
 
 window.addEventListener('resize', () => { if (drawing) sizeCanvases(); });
 window.addEventListener('orientationchange', () => setTimeout(() => { if (drawing) sizeCanvases(); }, 250));
+// Closing the tab or navigating away has to free the microphone as well, or it stays
+// held by Safari and no other app can record.
+window.addEventListener('pagehide', () => { if (transcriber) transcriber.end(); });
+
 window.addEventListener('error', e => log('JS ERROR: ' + e.message + ' @' + e.lineno));
 window.addEventListener('unhandledrejection', e => log('PROMISE: ' + (e.reason && e.reason.message)));
 

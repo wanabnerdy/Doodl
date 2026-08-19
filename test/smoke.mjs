@@ -72,6 +72,28 @@ note(await page.evaluate(() => window.__doodl.strokeCount()) === 3, 'third strok
 await page.click('#undoBtn');
 note(await page.evaluate(() => window.__doodl.strokeCount()) === 2, 'undo removes the last stroke');
 
+// Every control has to sit inside the viewport that browser chrome leaves behind —
+// the tester found Undo and the tool sheet hidden under Safari's address bar.
+const reachable = await page.evaluate(() => {
+  const h = window.innerHeight, out = [];
+  for (const id of ['endBtn', 'undoBtn', 'toolsBtn', 'highlightBtn']) {
+    const r = document.getElementById(id).getBoundingClientRect();
+    if (r.bottom > h || r.top < 0) out.push(id);
+  }
+  return out;
+});
+note(reachable.length === 0, 'every control sits inside the usable viewport', reachable.join(', '));
+
+await page.click('#toolsBtn');
+await page.waitForTimeout(350);
+const sheetOk = await page.evaluate(() => {
+  const r = document.getElementById('clearBtn').getBoundingClientRect();
+  return r.bottom <= window.innerHeight && r.top >= 0;
+});
+note(sheetOk, 'Clear is reachable inside the tool sheet');
+await page.click('#toolsDone');
+await page.waitForTimeout(300);
+
 // --- highlights -----------------------------------------------------------
 await page.click('#highlightBtn');
 await page.waitForTimeout(200);

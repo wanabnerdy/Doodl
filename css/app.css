@@ -23,6 +23,13 @@ html, body {
   user-select: none;
 }
 
+/* Safari puts its address bar over the bottom of the window and Chrome puts it at
+   the top, so "100% of the window" hides controls in both. svh is the viewport with
+   browser chrome visible — the height that is always actually usable. */
+@supports (height: 100svh) {
+  html, body { height: 100svh; }
+}
+
 .screen { display: none; height: 100%; }
 .screen.active { display: block; }
 
@@ -90,14 +97,10 @@ html, body {
 .dot.error { background: #ff6b6b; }
 @keyframes pulse { 50% { opacity: .25; } }
 
-.corner {
-  position: absolute; bottom: calc(env(safe-area-inset-bottom) + 18px);
-  display: flex; gap: 8px;
-}
-.corner.left { left: 14px; }
+.pill.icon { padding: 9px 13px; font-size: 17px; line-height: 1; }
 
 #highlightBtn {
-  position: absolute; right: 18px; bottom: calc(env(safe-area-inset-bottom) + 18px);
+  position: absolute; right: 18px; bottom: calc(env(safe-area-inset-bottom) + 26px);
   width: 86px; height: 86px; border-radius: 50%; border: none;
   background: var(--accent); color: #1a1206;
   font: 700 14px/1.2 inherit; box-shadow: 0 6px 20px rgba(0,0,0,.35);

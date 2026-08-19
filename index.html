@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#14161c">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <title>Doodl</title>
-<link rel="stylesheet" href="./css/app.css?v=101">
+<link rel="stylesheet" href="./css/app.css?v=102">
 </head>
 <body>
 
@@ -38,12 +38,8 @@
     <button class="pill" id="endBtn">Finish</button>
     <span class="pill status"><span class="dot" id="stateDot"></span><span id="stateText">off</span></span>
     <span class="pill spacer"></span>
+    <button class="pill icon" id="undoBtn" aria-label="Undo">&#8630;</button>
     <button class="pill" id="toolsBtn">Tools</button>
-  </div>
-
-  <div class="corner left">
-    <button class="pill" id="undoBtn">Undo</button>
-    <button class="pill" id="clearBtn">Clear</button>
   </div>
 
   <button id="highlightBtn"><span class="count" id="hlCount">0</span>Highlight</button>
@@ -60,6 +56,10 @@
     <div class="tool-row">
       <h4>Paper</h4>
       <div class="bgs" id="bgs"></div>
+    </div>
+    <div class="tool-row">
+      <h4>Page</h4>
+      <button class="bg-opt" id="clearBtn" style="color:#ff8080">Clear everything</button>
     </div>
     <button class="big-btn ghost" id="toolsDone" style="margin:0">Done</button>
   </div>
@@ -83,6 +83,6 @@
 
 <div id="debug"></div>
 
-<script type="module" src="./js/app.js?v=101"></script>
+<script type="module" src="./js/app.js?v=102"></script>
 </body>
 </html>

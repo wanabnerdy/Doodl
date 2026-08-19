@@ -20,6 +20,7 @@
 const SAMPLE_INTERVAL_MS = 250;
 const RESTART_DELAY_MS = 300;
 const STALE_AFTER_MS = 20000;
+const RELEASE_GRACE_MS = 700;   // long enough for a trailing final, short enough to feel instant
 
 export function createTranscriber({ now, onState, onUtterance, log }) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -175,13 +176,36 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
       }, 5000);
     },
 
+    // Returns a promise: teardown is deliberately not instant.
+    //
+    // Calling stop() alone leaves Safari holding the audio session, which locks the
+    // microphone away from every other app on the phone until Safari is force quit.
+    // abort() is what actually releases it. But aborting immediately would throw away
+    // the last final, which the probe measured arriving 130–290 ms AFTER stop. So:
+    // stop, keep listening briefly for that straggler, then abort and let go.
     end() {
       active = false;
       clearInterval(watchdog);
       watchdog = null;
-      try { rec && rec.stop(); } catch (e) { /* already stopped */ }
-      flushPending();
+
+      const dying = rec;
+      rec = null;
       setState('idle');
+
+      if (!dying) { flushPending(); return Promise.resolve(); }
+
+      dying.onend = () => say('speech: ended');   // detached from the restart path
+      try { dying.stop(); } catch (e) { /* already stopped */ }
+
+      return new Promise(resolve => {
+        setTimeout(() => {
+          dying.onresult = dying.onerror = dying.onend = dying.onstart = null;
+          try { dying.abort(); } catch (e) { /* nothing left to abort */ }
+          flushPending();
+          say('speech: microphone released');
+          resolve();
+        }, RELEASE_GRACE_MS);
+      });
     },
 
     // Where in the transcript was this moment? Returns the utterance in play at time T
