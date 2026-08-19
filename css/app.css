@@ -168,6 +168,10 @@ html, body {
   font-size: 13px; color: var(--dim); margin: -6px 0 16px;
   border-left: 2px solid var(--line); padding-left: 10px;
 }
+.released {
+  font-size: 13px; color: var(--live); margin: -8px 0 14px;
+  border-left: 2px solid var(--live); padding-left: 10px;
+}
 .coverage.poor { color: var(--warn); border-color: var(--warn); }
 .transcript p.gap {
   color: var(--warn); font-size: 12px; font-style: italic;

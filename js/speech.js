@@ -30,7 +30,7 @@ const RELEASE_GRACE_MS = 700;     // long enough for a trailing final, short eno
 const CHASER_MS = 400;
 const CHASER_TIMEOUT_MS = 2500;   // the reset is best-effort; it must never hang the wrap-up
 
-export function createTranscriber({ now, onState, onUtterance, log }) {
+export function createTranscriber({ now, onState, onUtterance, onRelease, log }) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const utterances = [];
 
@@ -89,7 +89,18 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     } finally {
       // The request may still land after the race is lost; close it either way.
       if (stream) stream.getTracks().forEach(t => t.stop());
+      // The repair is itself a microphone request, so the indicator lights up again
+      // for a moment after finishing. Callers can say so rather than leave the user
+      // wondering whether the app let go.
+      if (onRelease) onRelease();
     }
+  }
+
+  // Recorded, not acted upon. Removing the hide handler also removed any trace of when
+  // the app was backgrounded, which left the diagnostics unable to show whether a
+  // stretch of silence coincided with a screen lock.
+  function noteVisibility() {
+    say('page ' + (document.hidden ? 'hidden' : 'visible'));
   }
 
   function closeSegment() {
@@ -280,6 +291,7 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
       active = true;
       paused = false;
       setState('starting');
+      document.addEventListener('visibilitychange', noteVisibility);
       start();
       watchdog = setInterval(() => {
         if (!active) return;
@@ -303,6 +315,7 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
       paused = false;
       clearInterval(watchdog);
       watchdog = null;
+      document.removeEventListener('visibilitychange', noteVisibility);
 
       const dying = rec;
       rec = null;

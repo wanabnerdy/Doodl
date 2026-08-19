@@ -6,7 +6,7 @@ import * as store from './store.js';
 const COLORS = ['#232a33', '#2f6fd0', '#c8402f', '#1f8a53', '#8a4fbd', '#d98324'];
 const SIZES = [2.5, 4.5, 8, 14];          // css px, converted to normalised units per stroke
 const SAVE_INTERVAL_MS = 5000;
-const BUILD = 'v1.2.0';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+const BUILD = 'v1.2.1';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -109,7 +109,8 @@ async function startSession(withMic = true) {
     now,
     log,
     onState: setSpeechState,
-    onUtterance: u => log('utterance +' + (u.startT / 1000).toFixed(1) + 's: ' + u.text.slice(0, 60))
+    onUtterance: u => log('utterance +' + (u.startT / 1000).toFixed(1) + 's: ' + u.text.slice(0, 60)),
+    onRelease: showReleased
   });
 
   if (!transcriber.supported) {
@@ -430,6 +431,18 @@ async function exportSession(s) {
     await navigator.clipboard.writeText(text);
     alert('Copied the session to the clipboard.');
   }
+}
+
+// Finishing hands the microphone back and then briefly takes it again to repair the
+// audio route, so the phone's recording indicator flickers back on afterwards. Saying
+// so beats leaving the user to wonder whether the app really let go.
+function showReleased() {
+  const el = $('released');
+  if (!el) return;
+  el.style.display = 'block';
+  el.textContent = 'Microphone released';
+  clearTimeout(showReleased._t);
+  showReleased._t = setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 
 // Everything needed to tell a quiet room from a deaf app, in one paste. Screenshots

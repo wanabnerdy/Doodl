@@ -68,7 +68,11 @@ globalThis.document = {
 const { createTranscriber } = await import('../js/speech.js');
 
 let clock = 0;
-const t = createTranscriber({ now: () => clock, onState: () => {}, log: () => {} });
+let released = 0;
+const t = createTranscriber({
+  now: () => clock, onState: () => {}, log: () => {},
+  onRelease: () => { released++; }
+});
 t.begin();
 const inst1 = instance;   // captured: a later transcriber replaces the shared handle
 
@@ -165,6 +169,12 @@ await t.end();   // async now: it waits briefly for a trailing final, then frees
 // dictation working while speech recognition breaks it, so the harmless one is used
 // to chase the harmful one.
 check(chaserRuns === 1, 'ending a session resets the audio route', chaserRuns + ' runs');
+// The repair takes the microphone again briefly and finishing deliberately does not
+// wait for it, so the report arrives later. That lag is the whole reason the caller
+// needs telling: the phone's indicator flickering back on otherwise reads as the app
+// having failed to let go.
+await new Promise(r => setTimeout(r, 700));
+check(released === 1, 'and reports the release once it is complete', released + ' reports');
 console.log('          ran with permission reporting \'' + permissionState +
             '\' — a stricter guard would have skipped it');
 
