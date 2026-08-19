@@ -30,6 +30,13 @@ html, body {
   html, body { height: 100svh; }
 }
 
+/* CSS units still guess. --app-h is measured from visualViewport in JS, which is the
+   only thing that reports what iOS Safari is actually leaving visible, and it wins. */
+html, body { height: var(--app-h, 100svh); }
+
+/* Width 0 so it is invisible; its height reports the safe-area inset for diagnostics. */
+#insetProbe { position: fixed; bottom: 0; left: 0; width: 0; height: env(safe-area-inset-bottom); pointer-events: none; }
+
 .screen { display: none; height: 100%; }
 .screen.active { display: block; }
 
@@ -38,7 +45,7 @@ html, body {
 #home, #wrap {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: calc(env(safe-area-inset-top) + 20px) 18px calc(env(safe-area-inset-bottom) + 28px);
+  padding: calc(env(safe-area-inset-top) + 20px) 18px calc(env(safe-area-inset-bottom) + 90px);
 }
 
 .brand { font-size: 30px; font-weight: 700; letter-spacing: -0.5px; margin: 0; }

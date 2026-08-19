@@ -49,9 +49,10 @@ const { createTranscriber } = await import('../js/speech.js');
 let clock = 0;
 const t = createTranscriber({ now: () => clock, onState: () => {}, log: () => {} });
 t.begin();
+const inst1 = instance;   // captured: a later transcriber replaces the shared handle
 
 const fire = (text, isFinal) =>
-  instance.onresult({ resultIndex: 0, results: [{ 0: { transcript: text }, isFinal }] });
+  inst1.onresult({ resultIndex: 0, results: [{ 0: { transcript: text }, isFinal }] });
 
 // Replay the timeline in order, interims and finals interleaved by timestamp.
 const timeline = [
@@ -104,6 +105,31 @@ check(second && second.charOffset === 24, 'positioned by that sentence own sampl
 
 // Before anyone spoke at all.
 check(t.anchorAt(500) === null, 'a highlight before any speech has no anchor');
+
+// A highlight tapped mid-sentence, BEFORE that sentence has finalised. This is the
+// normal case in a real meeting and it was landing on the previous sentence: at tap
+// time the words being spoken exist only as pending interim text, so a lookup over
+// finished utterances cannot see them. Resolving after the session ends fixes it.
+{
+  const clockRef = { v: 0 };
+  const live = createTranscriber({ now: () => clockRef.v, onState: () => {}, log: () => {} });
+  live.begin();
+  const inst2 = instance;
+  const emit = (text, isFinal) =>
+    inst2.onresult({ resultIndex: 0, results: [{ 0: { transcript: text }, isFinal }] });
+
+  clockRef.v = 1000; emit('we should ship the', false);
+  clockRef.v = 2000; emit('we should ship the pricing change before', false);
+  const tapped = 2000;                       // tapped here, mid-sentence
+  const atTap = live.anchorAt(tapped);
+  check(atTap === null || !atTap.during, 'mid-sentence tap cannot resolve yet (this was the bug)');
+
+  clockRef.v = 4500; emit('we should ship the pricing change before the board meeting', true);
+  const resolved = live.anchorAt(tapped);
+  check(resolved && resolved.during, 'and resolves correctly once the sentence finalises');
+  check(resolved && resolved.charOffset === 40, 'landing on the words spoken at tap time',
+        'char ' + (resolved && resolved.charOffset));
+}
 
 // The recorded run lost words this way: the tester was still mid-sentence when the
 // test ended, and those ~40 characters were never finalised — they existed only as

@@ -6,7 +6,7 @@ import * as store from './store.js';
 const COLORS = ['#232a33', '#2f6fd0', '#c8402f', '#1f8a53', '#8a4fbd', '#d98324'];
 const SIZES = [2.5, 4.5, 8, 14];          // css px, converted to normalised units per stroke
 const SAVE_INTERVAL_MS = 5000;
-const BUILD = 'v1.0.2';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+const BUILD = 'v1.0.3';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -68,7 +68,12 @@ async function renderHome() {
     }
   }
   const u = await store.usage();
-  $('storageLine').textContent = BUILD + (u ? '  ·  ' + u.usedMB.toFixed(1) + ' MB used' : '');
+  const vv = window.visualViewport;
+  const inset = Math.round(parseFloat(getComputedStyle($('insetProbe')).height) || 0);
+  $('storageLine').textContent =
+    BUILD + '  ·  ' + window.innerWidth + '\u00d7' + window.innerHeight +
+    (vv ? ' vv' + Math.round(vv.height) : ' vv-') + ' inset' + inset +
+    (u ? '  ·  ' + u.usedMB.toFixed(1) + ' MB' : '');
 }
 
 /* --------------------------------------------------------- active session */
@@ -136,7 +141,10 @@ function setSpeechState(state) {
 async function endSession() {
   clearInterval(saveTimer);
   saveTimer = null;
-  if (transcriber) await transcriber.end();
+  if (transcriber) {
+    await transcriber.end();
+    for (const h of session.highlights) h.anchor = transcriber.anchorAt(h.t);
+  }
   releaseWakeLock();
   session.endedAt = Date.now();
   await persist();
@@ -240,11 +248,12 @@ for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
 function addHighlight() {
   if (!session) return;
   const t = now();
-  session.highlights.push({
-    id: 'H' + session.highlights.length,
-    t,
-    anchor: transcriber ? transcriber.anchorAt(t) : null
-  });
+  // Only the timestamp is recorded here. The sentence being spoken right now has
+  // not been finalised yet — it exists solely as pending interim text — so resolving
+  // the anchor at this moment would attach the highlight to the PREVIOUS finished
+  // sentence and label it "between sentences". Anchors are resolved at the end of
+  // the session instead, when every utterance actually exists.
+  session.highlights.push({ id: 'H' + session.highlights.length, t, anchor: null });
   $('hlCount').textContent = session.highlights.length;
   const flash = $('flash');
   flash.classList.add('on');
@@ -482,7 +491,24 @@ $('toolsDone').onclick = closeTools;
 $('homeBtn').onclick = goHome;
 $('debugToggle').onclick = () => $('debug').classList.toggle('open');
 
-window.addEventListener('resize', () => { if (drawing) sizeCanvases(); });
+// iOS Safari's address bar overlays the window, so window.innerHeight lies about what
+// is visible and CSS viewport units only approximate it. visualViewport reports the
+// area actually on screen; everything is sized from that.
+let lastViewportH = 0;
+function applyViewport() {
+  const vv = window.visualViewport;
+  const h = Math.round(vv ? vv.height : window.innerHeight);
+  if (h === lastViewportH) return;
+  lastViewportH = h;
+  document.documentElement.style.setProperty('--app-h', h + 'px');
+  if (drawing) sizeCanvases();
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', applyViewport);
+  window.visualViewport.addEventListener('scroll', applyViewport);
+}
+window.addEventListener('resize', applyViewport);
 window.addEventListener('orientationchange', () => setTimeout(() => { if (drawing) sizeCanvases(); }, 250));
 // Closing the tab or navigating away has to free the microphone as well, or it stays
 // held by Safari and no other app can record.
@@ -491,6 +517,7 @@ window.addEventListener('pagehide', () => { if (transcriber) transcriber.end(); 
 window.addEventListener('error', e => log('JS ERROR: ' + e.message + ' @' + e.lineno));
 window.addEventListener('unhandledrejection', e => log('PROMISE: ' + (e.reason && e.reason.message)));
 
+applyViewport();
 buildTools();
 store.requestPersistence().then(ok => log('persistent storage: ' + ok));
 renderHome();
