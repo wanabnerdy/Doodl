@@ -37,16 +37,18 @@ const FINALS = [
 
 // --- a stand-in for the browser's SpeechRecognition ------------------------
 let instance = null;
+let startCount = 0;
 class FakeRecognition {
   constructor() { instance = this; }
-  start() { if (this.onstart) this.onstart(); }
+  start() { startCount++; if (this.onstart) this.onstart(); }
   stop() { if (this.onend) this.onend(); }
 }
 globalThis.window = { SpeechRecognition: FakeRecognition };
 // speech.js checks visibility before reclaiming the microphone, so the stub needs it
+let visibilityHandler = () => {};
 globalThis.document = {
   hidden: false,
-  addEventListener() {},
+  addEventListener(type, fn) { if (type === 'visibilitychange') visibilityHandler = fn; },
   removeEventListener() {}
 };
 
@@ -156,20 +158,28 @@ check(last && last.provisional && last.text.startsWith('and if that slips'),
   const bg = createTranscriber({ now: () => 0, onState: () => {}, log: () => {} });
   bg.begin();
   const inst = instance;
-  let starts = 0;
-  inst.start = () => { starts++; };
 
+  // Backgrounding must actively release the microphone, not merely decline to
+  // reacquire it: a timer-based release never runs, because iOS suspends timers in a
+  // backgrounded tab, and the mic stays held while the user is in another app.
+  let aborted = false;
+  inst.abort = () => { aborted = true; };
   document.hidden = true;
-  inst.onend();                       // recognition dies while backgrounded
-  await new Promise(r => setTimeout(r, 500));
-  check(starts === 0, 'a backgrounded page does not grab the microphone back', starts + ' starts');
+  visibilityHandler();
+  check(aborted, 'backgrounding releases the microphone immediately');
 
-  document.hidden = false;
-  bg.begin();                          // no-op, already active
-  starts = 0;
-  inst.onend();
+  const afterHide = startCount;
   await new Promise(r => setTimeout(r, 500));
-  check(starts === 1, 'and resumes once the page is visible again', starts + ' starts');
+  check(startCount === afterHide, 'and does not grab it back while still in the background',
+        (startCount - afterHide) + ' starts');
+
+  // Resuming builds a fresh recognition object, since the previous one was aborted.
+  const beforeShow = startCount;
+  document.hidden = false;
+  visibilityHandler();
+  await new Promise(r => setTimeout(r, 500));
+  check(startCount === beforeShow + 1, 'and resumes once the page is visible again',
+        (startCount - beforeShow) + ' starts');
   await bg.end();
   document.hidden = false;
 }

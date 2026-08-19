@@ -169,8 +169,28 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     }
   }
 
+  // Leaving the page is the moment to let go of the microphone. Holding it while the
+  // user is in another app is precisely what blocks that app from recording — and a
+  // timer-based release cannot be relied on, because iOS suspends timers in a
+  // backgrounded tab. This fires on the way out, while the page is still running.
   function onVisibility() {
-    if (!active || document.hidden || !resumeWhenVisible) return;
+    if (!active) return;
+
+    if (document.hidden) {
+      if (rec) {
+        const dying = rec;
+        rec = null;
+        dying.onend = dying.onresult = dying.onerror = dying.onstart = null;
+        try { dying.abort(); } catch (e) { /* nothing to abort */ }
+        flushPending();
+        say('speech: page hidden — microphone released');
+      }
+      resumeWhenVisible = true;
+      setState('starting');
+      return;
+    }
+
+    if (!resumeWhenVisible) return;
     resumeWhenVisible = false;
     say('speech: visible again, resuming');
     setState('starting');

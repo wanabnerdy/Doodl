@@ -54,7 +54,10 @@
 </div>
 
 <h1>Which one breaks the microphone?</h1>
-<p class="sub">Three different ways a web page can use the mic. Run <b>one</b>, then switch to your dictation app and try to talk. Come back and record what happened. Force-quit and reopen the dictation app between tests so each one starts clean.</p>
+<p class="sub"><b>Wait for the test to say the microphone is released before switching apps.</b>
+Leaving early means it was still legitimately open, which tells us nothing. Run <b>one</b>
+test, wait for the release, then switch to your dictation app and try to talk. Come back
+and record what happened.</p>
 
 <div class="card">
   <h2>A · Microphone stream only<span id="tag-a"></span></h2>
@@ -94,6 +97,28 @@
 
 <script>
 const R = { ua: navigator.userAgent, bluetooth: null, devices: [], tests: {} };
+
+// Anything currently holding the microphone, so it can be dropped the instant the
+// page is hidden. The original timer-based cleanup never ran if the tester switched
+// apps first — iOS suspends timers in a backgrounded tab — so the microphone stayed
+// open and the next app was told it was in use. That was the probe's fault, not a
+// finding about the app.
+let holding = null;
+function release(why) {
+  if (!holding) return;
+  const { stream, recorder, recognition, key } = holding;
+  holding = null;
+  try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (e) {}
+  try { if (recognition) { recognition.onend = recognition.onresult = null; recognition.abort(); } } catch (e) {}
+  try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  if (R.tests[key]) R.tests[key].releasedEarlyBy = why;
+  state(key, 'Microphone released (' + why + '). Now try your dictation app.', true);
+  $('v-' + key.toLowerCase()).style.display = 'flex';
+  $('btn-' + key.toLowerCase()).disabled = true;
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) release('you left the page');
+});
 
 function setRoute(on) {
   R.bluetooth = on;
@@ -143,11 +168,15 @@ async function runA() {
   state('A', 'Opening the microphone…');
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    holding = { stream, key: 'A' };
+    R.tests.A = { ran: true, bluetooth: R.bluetooth };
     setTimeout(() => {
+      if (!holding) return;
+      holding = null;
       stream.getTracks().forEach(t => t.stop());
       finished('A', { tracksStopped: true });
     }, 5000);
-    state('A', 'Microphone open — closing in 5 seconds…');
+    state('A', 'Microphone open — closing in 5 seconds. Stay on this page until it says released.');
   } catch (e) {
     state('A', 'Failed: ' + e.name + ' — ' + e.message, true);
     R.tests.A = { ran: true, error: e.name };
@@ -167,8 +196,10 @@ async function runB() {
       finished('B', { bytes: new Blob(chunks).size });
     };
     mr.start();
-    state('B', 'Recording — stopping in 5 seconds…');
-    setTimeout(() => mr.stop(), 5000);
+    holding = { stream, recorder: mr, key: 'B' };
+    R.tests.B = { ran: true, bluetooth: R.bluetooth };
+    state('B', 'Recording — stopping in 5 seconds. Stay on this page until it says released.');
+    setTimeout(() => { if (holding) { holding = null; mr.stop(); } }, 5000);
   } catch (e) {
     state('B', 'Failed: ' + e.name + ' — ' + e.message, true);
     R.tests.B = { ran: true, error: e.name };
@@ -188,10 +219,14 @@ function runC() {
     for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) finals++;
   };
   rec.onerror = e => { R.tests.C = Object.assign(R.tests.C || {}, { error: e.error }); };
-  state('C', 'Listening — stopping in 5 seconds…');
+  state('C', 'Listening — stopping in 5 seconds. Stay on this page until it says released.');
   try { rec.start(); } catch (e) { state('C', 'start threw: ' + e.message, true); return; }
+  holding = { recognition: rec, key: 'C' };
+  R.tests.C = { ran: true, bluetooth: R.bluetooth };
 
   setTimeout(() => {
+    if (!holding) return;
+    holding = null;
     try { rec.stop(); } catch (e) {}
     // same teardown the app performs
     setTimeout(() => {
