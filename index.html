@@ -2,21 +2,86 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#14161c">
 <title>Doodl</title>
-<style>
-  body { margin:0; padding:40px 22px; background:#0f1115; color:#e7eaf0;
-         font:16px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
-  h1 { font-size:26px; margin:0 0 6px; }
-  p { color:#949cad; }
-  a { display:block; margin-top:22px; padding:16px; text-align:center; text-decoration:none;
-      background:#6ea8fe; color:#0f1115; font-weight:700; border-radius:10px; }
-</style>
+<link rel="stylesheet" href="./css/app.css">
 </head>
 <body>
-  <h1>Doodl</h1>
-  <p>A meeting companion: doodle full-screen while it quietly transcribes, and tap to capture highlights.</p>
-  <p>Nothing is built yet. First step is finding out what this phone can actually do.</p>
-  <a href="./probe/">Run the device probe</a>
+
+<!-- home ---------------------------------------------------------------- -->
+<section id="home" class="screen active">
+  <h1 class="brand">Doodl</h1>
+  <p class="tagline">Doodle through the meeting. It listens, you tap the moments that matter.</p>
+
+  <button class="big-btn" id="newSessionBtn">Start a session</button>
+
+  <p class="section-label">Past sessions</p>
+  <div id="sessionList"></div>
+
+  <div class="foot">
+    <span id="storageLine"></span>
+    <button id="debugToggle">log</button>
+  </div>
+</section>
+
+<!-- active session ------------------------------------------------------ -->
+<section id="session" class="screen">
+  <canvas id="bgCanvas"></canvas>
+  <canvas id="inkCanvas"></canvas>
+  <div id="flash"></div>
+
+  <div class="hud">
+    <button class="pill" id="endBtn">Finish</button>
+    <span class="pill status"><span class="dot" id="stateDot"></span><span id="stateText">off</span></span>
+    <span class="pill spacer"></span>
+    <button class="pill" id="toolsBtn">Tools</button>
+  </div>
+
+  <div class="corner left">
+    <button class="pill" id="undoBtn">Undo</button>
+    <button class="pill" id="clearBtn">Clear</button>
+  </div>
+
+  <button id="highlightBtn"><span class="count" id="hlCount">0</span>Highlight</button>
+
+  <div id="tools">
+    <div class="tool-row">
+      <h4>Colour</h4>
+      <div class="swatches" id="swatches"></div>
+    </div>
+    <div class="tool-row">
+      <h4>Thickness</h4>
+      <div class="sizes" id="sizes"></div>
+    </div>
+    <div class="tool-row">
+      <h4>Paper</h4>
+      <div class="bgs" id="bgs"></div>
+    </div>
+    <button class="big-btn ghost" id="toolsDone" style="margin:0">Done</button>
+  </div>
+</section>
+
+<!-- wrap-up ------------------------------------------------------------- -->
+<section id="wrap" class="screen">
+  <p class="section-label" id="wrapDate"></p>
+  <input class="title-input" id="wrapTitle" placeholder="Name this meeting">
+
+  <p class="section-label">Highlights</p>
+  <div id="hlList"></div>
+
+  <p class="section-label">Full transcript</p>
+  <div class="transcript" id="transcriptBox"></div>
+
+  <button class="big-btn" id="shareBtn" style="margin-top:22px">Export</button>
+  <button class="big-btn ghost" id="homeBtn">Back to sessions</button>
+  <button class="big-btn ghost" id="deleteBtn" style="color:#ff8080">Delete this session</button>
+</section>
+
+<div id="debug"></div>
+
+<script type="module" src="./js/app.js"></script>
 </body>
 </html>

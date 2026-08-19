@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Doodl — Speech Probe 2</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#262b36; --fg:#e7eaf0; --dim:#949cad;
+          --go:#46d17f; --hush:#f2c14e; --accent:#6ea8fe; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; padding:16px 14px 40px; background:var(--bg); color:var(--fg);
+         font:15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { color:var(--dim); font-size:13px; margin:0 0 16px; }
+  .stage { background:var(--card); border:1px solid var(--line); border-radius:14px;
+           padding:20px 16px; text-align:center; margin-bottom:12px; }
+  .cue { font-size:26px; font-weight:700; margin:0 0 6px; }
+  .cue.go { color:var(--go); } .cue.hush { color:var(--hush); } .cue.wait { color:var(--dim); }
+  .clock { color:var(--dim); font-size:13px; }
+  .bar { height:6px; background:#20242e; border-radius:99px; margin-top:14px; overflow:hidden; }
+  .bar i { display:block; height:100%; width:0; background:var(--accent); transition:width .25s linear; }
+  .read { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:14px; font-size:16px; line-height:1.6; margin-bottom:12px; }
+  .read.dim { opacity:.3; }
+  button { appearance:none; border:1px solid var(--line); background:#222735; color:var(--fg);
+           font:600 16px/1 inherit; padding:16px; border-radius:11px; width:100%; margin-bottom:10px; }
+  button.primary { background:var(--accent); color:#0f1115; border-color:var(--accent); }
+  button:disabled { opacity:.45; }
+  pre { background:#10131a; border:1px solid var(--line); border-radius:10px; padding:10px;
+        font-size:11px; max-height:240px; overflow:auto; color:var(--dim); white-space:pre-wrap; }
+  .stat { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .stat:last-child { border:none; }
+  .stat b { font-weight:600; }
+</style>
+</head>
+<body>
+
+<h1>Speech Probe 2 — scripted</h1>
+<p class="sub">The first probe let me guess about timing. This one tells you exactly when to talk and when to stay quiet, and only starts the clock once the browser says it is actually listening.</p>
+
+<div class="stage">
+  <p class="cue wait" id="cue">Ready</p>
+  <div class="clock" id="clock">Tap start, then follow the prompts. About 80 seconds.</div>
+  <div class="bar"><i id="bar"></i></div>
+</div>
+
+<div class="read" id="reading">
+  <b>Read this aloud when prompted</b><br><br>
+  The quarterly numbers came in ahead of plan, mostly on the back of renewals rather
+  than new business. Engineering shipped the migration two weeks late, which pushed
+  the launch into the following month. Nobody was thrilled about that, but the
+  alternative was shipping something half finished. For next quarter the priority is
+  reducing churn in the mid market, and we need a decision on pricing before the
+  board meeting. If that slips again we lose the whole window.
+</div>
+
+<button class="primary" id="startBtn">Start scripted test</button>
+<button id="copyBtn" disabled>Copy results</button>
+
+<div id="summary"></div>
+<pre id="log"></pre>
+
+<script>
+const SCRIPT = [
+  { cue: 'Talk',          klass: 'go',   secs: 25, hint: 'Read the passage aloud, normal pace.' },
+  { cue: 'Silence',       klass: 'hush', secs: 20, hint: 'Say nothing at all. This is the real test.' },
+  { cue: 'Talk again',    klass: 'go',   secs: 25, hint: 'Pick up reading wherever you like.' },
+  { cue: 'Done',          klass: 'wait', secs: 0,  hint: '' }
+];
+const SAMPLE_MS = 500;
+
+const $ = id => document.getElementById(id);
+const R = { onstartLatencyMs: null, phases: [], finals: [], interimSamples: [],
+            lifecycle: [], restarts: 0, errors: [], survivedSilence: null, ua: navigator.UserAgent };
+R.ua = navigator.userAgent;
+
+const lines = [];
+let t0 = null;              // set when onstart fires — the clock starts when it listens
+let requestedAt = 0;
+let rec = null, active = false, phaseIdx = -1, lastSample = -Infinity;
+let lastFinalT = null, committedChars = 0;
+
+const now = () => t0 === null ? 0 : Date.now() - t0;
+function log(m) { lines.push('+' + (now()/1000).toFixed(2).padStart(6) + 's  ' + m);
+                  $('log').textContent = lines.join('\n'); }
+function phaseName() { return phaseIdx < 0 ? 'pre' : SCRIPT[phaseIdx].cue; }
+
+function start() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { $('cue').textContent = 'Not supported'; return; }
+  $('startBtn').disabled = true;
+  active = true;
+  requestedAt = Date.now();
+  $('cue').textContent = 'Warming up';
+  $('cue').className = 'cue wait';
+  $('clock').textContent = 'Waiting for the browser to actually begin listening…';
+  build();
+}
+
+function build() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  rec = new SR();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = 'en-US';
+
+  rec.onstart = () => {
+    if (t0 === null) {
+      t0 = Date.now();
+      R.onstartLatencyMs = t0 - requestedAt;
+      log('onstart (took ' + R.onstartLatencyMs + 'ms from request)');
+      runPhase(0);
+    } else {
+      log('onstart (after restart)');
+    }
+    R.lifecycle.push({ t: now(), event: 'start', phase: phaseName() });
+  };
+
+  rec.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) {
+        const t = now(), text = r[0].transcript.trim();
+        R.finals.push({ t, phase: phaseName(), chars: text.length,
+                        sincePrevFinalMs: lastFinalT === null ? null : t - lastFinalT,
+                        text: text.slice(0, 90) });
+        lastFinalT = t;
+        committedChars += text.length;
+        log('FINAL [' + phaseName() + '] ' + text.length + ' chars: "' + text.slice(0, 44) + '"');
+      } else interim += r[0].transcript;
+    }
+    if (interim) {
+      const t = now();
+      if (t - lastSample >= SAMPLE_MS) {
+        lastSample = t;
+        R.interimSamples.push({ t, phase: phaseName(), len: interim.length });
+      }
+    }
+  };
+
+  rec.onerror = e => {
+    R.errors.push({ t: now(), phase: phaseName(), error: e.error });
+    log('ERROR [' + phaseName() + '] ' + e.error);
+  };
+
+  rec.onend = () => {
+    R.lifecycle.push({ t: now(), event: 'end', phase: phaseName() });
+    log('onend [' + phaseName() + ']');
+    if (active) {
+      R.restarts++;
+      setTimeout(() => { if (active) { try { rec.start(); } catch (err) { log('restart threw ' + err.message); } } }, 300);
+    }
+  };
+
+  try { rec.start(); } catch (err) { log('start threw ' + err.message); }
+}
+
+function runPhase(i) {
+  phaseIdx = i;
+  const p = SCRIPT[i];
+  $('cue').textContent = p.cue;
+  $('cue').className = 'cue ' + p.klass;
+  $('reading').className = p.klass === 'go' ? 'read' : 'read dim';
+
+  if (i === SCRIPT.length - 1) return finish();
+
+  const startedAt = now();
+  R.phases.push({ name: p.cue, startT: startedAt, endT: startedAt + p.secs * 1000 });
+  let left = p.secs;
+  $('clock').textContent = p.hint + '  (' + left + 's)';
+  const tick = setInterval(() => {
+    left--;
+    $('bar').style.width = ((p.secs - left) / p.secs * 100) + '%';
+    if (left <= 0) { clearInterval(tick); $('bar').style.width = '0%'; runPhase(i + 1); }
+    else $('clock').textContent = p.hint + '  (' + left + 's)';
+  }, 1000);
+}
+
+function finish() {
+  active = false;
+  try { rec.stop(); } catch (e) {}
+  const stopAt = now();
+  setTimeout(() => {
+    // Anything finalised after we called stop was being withheld until then.
+    R.finalsAfterStop = R.finals.filter(f => f.t >= stopAt).length;
+    const silence = R.phases.find(p => p.name === 'Silence');
+    R.survivedSilence = !R.lifecycle.some(l => l.event === 'end' && l.t >= silence.startT && l.t <= silence.endT)
+                     && !R.errors.some(e => e.t >= silence.startT && e.t <= silence.endT && e.error !== 'no-speech');
+    R.stopCalledAtMs = stopAt;
+    render();
+    $('cue').textContent = 'Done';
+    $('clock').textContent = 'Tap Copy results and paste them into the chat.';
+    $('copyBtn').disabled = false;
+  }, 1200);
+}
+
+function render() {
+  const gaps = R.finals.map(f => f.sincePrevFinalMs).filter(v => v !== null);
+  const worst = gaps.length ? Math.max(...gaps) : 0;
+  const rows = [
+    ['Time to start listening', R.onstartLatencyMs + ' ms'],
+    ['Final results', R.finals.length],
+    ['Longest wait between finals', (worst / 1000).toFixed(1) + ' s'],
+    ['Finals withheld until stop', R.finalsAfterStop],
+    ['Died during silence', R.survivedSilence ? 'no — survived' : 'YES'],
+    ['Restarts needed', R.restarts],
+    ['Errors', R.errors.length ? R.errors.map(e => e.error).join(', ') : 'none']
+  ];
+  $('summary').innerHTML = rows.map(r =>
+    '<div class="stat"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>').join('');
+}
+
+$('startBtn').onclick = start;
+$('copyBtn').onclick = () => {
+  const out = '## Speech probe 2\n```json\n' + JSON.stringify(R, null, 2) +
+              '\n```\n### Log\n```\n' + lines.join('\n') + '\n```';
+  $('log').textContent = out;
+  if (navigator.clipboard) navigator.clipboard.writeText(out)
+    .then(() => { $('copyBtn').textContent = 'Copied — paste into chat'; })
+    .catch(() => { $('copyBtn').textContent = 'Select the text below and copy'; });
+};
+</script>
+</body>
+</html>
