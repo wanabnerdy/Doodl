@@ -20,7 +20,8 @@
 const SAMPLE_INTERVAL_MS = 250;
 const RESTART_DELAY_MS = 300;
 const STALE_AFTER_MS = 20000;
-const RELEASE_GRACE_MS = 700;   // long enough for a trailing final, short enough to feel instant
+const RELEASE_GRACE_MS = 700;
+const CHASER_MS = 400;   // long enough for a trailing final, short enough to feel instant
 
 export function createTranscriber({ now, onState, onUtterance, log }) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -35,6 +36,29 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
   let watchdog = null;
   let pending = newPending();
   let nextId = 1;
+
+  // Isolation testing on the target phone showed a bare getUserMedia stream leaves
+  // other apps' dictation working, while speech recognition breaks it — same device,
+  // same headset. JavaScript cannot touch the audio session directly, but opening and
+  // closing a harmless stream afterwards may re-establish the route through the path
+  // that demonstrably works.
+  //
+  // Guarded on an already-granted permission: requesting the microphone when it is
+  // still in the 'prompt' state would throw a dialog at someone who just finished.
+  async function resetAudioRoute() {
+    try {
+      const status = await navigator.permissions.query({ name: 'microphone' });
+      if (status.state !== 'granted') return;
+    } catch (e) { return; }        // cannot tell — do not risk a surprise prompt
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      await new Promise(r => setTimeout(r, CHASER_MS));
+      stream.getTracks().forEach(t => t.stop());
+      say('speech: audio route reset');
+    } catch (e) {
+      say('speech: route reset failed — ' + e.name);
+    }
+  }
 
   function newPending() {
     return { startT: null, samples: [], text: '' };
@@ -245,11 +269,12 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
       try { dying.stop(); } catch (e) { /* already stopped */ }
 
       return new Promise(resolve => {
-        setTimeout(() => {
+        setTimeout(async () => {
           dying.onresult = dying.onerror = dying.onend = dying.onstart = null;
           try { dying.abort(); } catch (e) { /* nothing left to abort */ }
           flushPending();
           say('speech: microphone released');
+          await resetAudioRoute();
           resolve();
         }, RELEASE_GRACE_MS);
       });

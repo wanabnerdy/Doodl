@@ -92,6 +92,20 @@ and record what happened.</p>
   </div>
 </div>
 
+<div class="card" style="border-color:#6ea8fe">
+  <h2>D · Recognition, then a plain stream<span id="tag-d"></span></h2>
+  <p>The same speech recognition as test C, but immediately afterwards it opens and closes
+     a bare microphone stream — the thing test A showed to be harmless. If that resets
+     whatever recognition leaves behind, this is the fix. If not, the Web Speech API is a
+     dead end on this phone and the app should transcribe some other way.</p>
+  <button onclick="runD()" id="btn-d">Run test D</button>
+  <div class="state" id="st-d">Not run</div>
+  <div class="verdict" id="v-d" style="display:none">
+    <button class="good" onclick="verdict('D', true)">Dictation still works</button>
+    <button class="bad" onclick="verdict('D', false)">Dictation broken</button>
+  </div>
+</div>
+
 <button class="primary" onclick="copyResults()">Copy results</button>
 <pre id="out" style="display:none"></pre>
 
@@ -233,6 +247,42 @@ function runC() {
       rec.onresult = rec.onerror = rec.onend = rec.onstart = null;
       try { rec.abort(); } catch (e) {}
       finished('C', { finals });
+    }, 700);
+  }, 5000);
+}
+
+// C, then A as a chaser. Test A proved a bare stream does no harm; the question is
+// whether it also repairs what recognition leaves behind.
+function runD() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { state('D', 'Speech recognition unavailable here.', true); return; }
+  const rec = new SR();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = 'en-US';
+  R.tests.D = { ran: true, bluetooth: R.bluetooth };
+  holding = { recognition: rec, key: 'D' };
+  state('D', 'Listening — 5 seconds, then the reset. Stay on this page.');
+  try { rec.start(); } catch (e) { state('D', 'start threw: ' + e.message, true); return; }
+
+  setTimeout(() => {
+    if (!holding) return;
+    holding = null;
+    try { rec.stop(); } catch (e) {}
+    setTimeout(async () => {
+      rec.onresult = rec.onerror = rec.onend = rec.onstart = null;
+      try { rec.abort(); } catch (e) {}
+      state('D', 'Recognition stopped — resetting the audio route…');
+      let reset = false;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        await new Promise(r => setTimeout(r, 400));
+        stream.getTracks().forEach(t => t.stop());
+        reset = true;
+      } catch (e) {
+        R.tests.D.resetError = e.name;
+      }
+      finished('D', { chaserRan: reset });
     }, 700);
   }, 5000);
 }

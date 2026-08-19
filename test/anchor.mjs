@@ -45,6 +45,18 @@ class FakeRecognition {
 }
 globalThis.window = { SpeechRecognition: FakeRecognition };
 // speech.js checks visibility before reclaiming the microphone, so the stub needs it
+let chaserRuns = 0;
+// Node supplies its own read-only navigator, so it has to be defined over.
+Object.defineProperty(globalThis, 'navigator', {
+  configurable: true,
+  value: {
+    permissions: { query: async () => ({ state: 'granted' }) },
+    mediaDevices: {
+      getUserMedia: async () => { chaserRuns++; return { getTracks: () => [{ stop() {} }] }; }
+    }
+  }
+});
+
 let visibilityHandler = () => {};
 globalThis.document = {
   hidden: false,
@@ -146,6 +158,13 @@ clock = 69951;
 fire('and if that slips again we lose the whole', false);
 clock = 70259;
 await t.end();   // async now: it waits briefly for a trailing final, then frees the mic
+
+// After teardown, a bare stream is opened and closed to re-establish the audio route.
+// Isolation testing on the target phone showed that a plain stream leaves other apps'
+// dictation working while speech recognition breaks it, so the harmless one is used
+// to chase the harmful one.
+check(chaserRuns === 1, 'ending a session resets the audio route', chaserRuns + ' runs');
+
 const last = t.utterances[t.utterances.length - 1];
 check(t.utterances.length === 3, 'unfinalised trailing speech is kept, not lost',
       t.utterances.length + ' utterances');
