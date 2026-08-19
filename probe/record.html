@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Doodl — Recording Survival</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#262b36; --fg:#e7eaf0; --dim:#949cad;
+          --ok:#46d17f; --bad:#ff6b6b; --warn:#f2c14e; --accent:#6ea8fe; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; padding:16px 14px 50px; background:var(--bg); color:var(--fg);
+         font:15px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  h1 { font-size:19px; margin:0 0 6px; }
+  .sub { color:var(--dim); font-size:13px; margin:0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:16px; margin-bottom:12px; }
+  ol { margin:0; padding-left:20px; color:var(--dim); font-size:14px; }
+  ol li { margin-bottom:9px; }
+  ol li b { color:var(--fg); }
+  button { appearance:none; border:1px solid var(--line); background:#222735; color:var(--fg);
+           font:600 16px/1 inherit; padding:16px; border-radius:11px; width:100%; margin-bottom:10px; }
+  button.primary { background:var(--accent); color:#0f1115; border-color:var(--accent); }
+  button.stop { background:var(--bad); color:#0f1115; border-color:var(--bad); }
+  button:disabled { opacity:.4; }
+  .live { font:700 30px/1 ui-monospace, Menlo, monospace; text-align:center; margin:6px 0; }
+  .live small { display:block; font:400 12px/1.4 inherit; color:var(--dim); margin-top:8px; }
+  .stat { display:flex; justify-content:space-between; gap:10px; padding:8px 0;
+          border-bottom:1px solid var(--line); font-size:14px; }
+  .stat:last-child { border:none; }
+  .stat b { font-weight:600; text-align:right; }
+  .stat b.ok { color:var(--ok); } .stat b.bad { color:var(--bad); } .stat b.warn { color:var(--warn); }
+  pre { background:#10131a; border:1px solid var(--line); border-radius:10px; padding:10px;
+        font-size:11px; max-height:240px; overflow:auto; color:var(--dim); white-space:pre-wrap; }
+  a.back { display:block; padding:14px; margin-bottom:14px; text-align:center; text-decoration:none;
+           background:#ffb347; color:#1a1206; border-radius:10px; font-weight:700; }
+</style>
+</head>
+<body>
+
+<a class="back" href="../">&larr; This is a test page. Go to the Doodl app</a>
+
+<h1>Does recording survive?</h1>
+<p class="sub">This deliberately <b>never stops the recorder itself</b> — not when the page is hidden,
+not when the screen locks. Anything that stops is iOS doing it, which is the only thing worth
+measuring. Chunks are timestamped as they arrive, so a suspension shows up as a hole.</p>
+
+<div class="card">
+  <ol>
+    <li>Tap <b>Start</b>, then talk or play something continuously the whole time.</li>
+    <li>Stay on this page for about <b>15 seconds</b>.</li>
+    <li><b>Switch to another app</b> for about 20 seconds, then come back.</li>
+    <li>Wait about 10 seconds.</li>
+    <li><b>Lock the screen</b> for about 20 seconds, then unlock and return.</li>
+    <li>Wait about 10 seconds, then tap <b>Stop</b>.</li>
+  </ol>
+</div>
+
+<div class="live" id="live">00:00<small id="livesub">not recording</small></div>
+
+<button class="primary" id="startBtn" onclick="start()">Start</button>
+<button class="stop" id="stopBtn" onclick="stop()" disabled>Stop</button>
+
+<div class="card" id="results" style="display:none"><div id="stats"></div></div>
+<button id="copyBtn" onclick="copyResults()" disabled>Copy results</button>
+<pre id="log"></pre>
+
+<script>
+const CHUNK_MS = 1000;          // a chunk a second: fine enough to see a hole
+const HOLE_MS  = 2500;          // arrivals further apart than this mean capture stopped
+
+const R = { ua: navigator.userAgent, chunkMs: CHUNK_MS, chunks: [], visibility: [], holes: [] };
+const $ = id => document.getElementById(id);
+const lines = [];
+
+let recorder = null, stream = null, chunks = [];
+let startedAt = 0, lastChunkAt = 0, ticker = null;
+
+function log(m) {
+  const t = startedAt ? ((Date.now() - startedAt) / 1000).toFixed(1) : '0.0';
+  lines.push('+' + t.padStart(6) + 's  ' + m);
+  $('log').textContent = lines.join('\n');
+}
+const clock = ms => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+};
+
+document.addEventListener('visibilitychange', () => {
+  if (!startedAt) return;
+  const at = Date.now() - startedAt;
+  R.visibility.push({ at, hidden: document.hidden });
+  log(document.hidden ? 'page hidden — recorder deliberately left running'
+                      : 'page visible again');
+});
+
+async function start() {
+  $('startBtn').disabled = true;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    log('microphone refused: ' + e.name);
+    $('startBtn').disabled = false;
+    return;
+  }
+  const preferred = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm']
+    .find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m));
+  recorder = new MediaRecorder(stream, preferred ? { mimeType: preferred } : undefined);
+  R.mimeType = recorder.mimeType;
+
+  startedAt = Date.now();
+  lastChunkAt = startedAt;
+
+  recorder.ondataavailable = e => {
+    const at = Date.now() - startedAt;
+    const since = Date.now() - lastChunkAt;
+    lastChunkAt = Date.now();
+    chunks.push(e.data);
+    R.chunks.push({ at, bytes: e.data.size, sincePrevMs: since });
+    // A gap between arrivals is the page having been frozen — the recorder cannot
+    // report this itself, which is why arrival times are what get measured.
+    if (since >= HOLE_MS) {
+      R.holes.push({ from: at - since, to: at, ms: since });
+      log('HOLE — nothing captured for ' + (since / 1000).toFixed(1) + 's');
+    }
+  };
+  recorder.onerror = e => log('recorder error: ' + (e.error && e.error.name));
+  recorder.start(CHUNK_MS);
+  log('recording started as ' + recorder.mimeType);
+
+  $('stopBtn').disabled = false;
+  ticker = setInterval(() => {
+    const el = Date.now() - startedAt;
+    $('live').firstChild.textContent = clock(el);
+    $('livesub').textContent = R.chunks.length + ' chunks · ' +
+      (R.holes.length ? R.holes.length + ' hole(s) so far' : 'continuous so far');
+  }, 500);
+}
+
+async function stop() {
+  $('stopBtn').disabled = true;
+  clearInterval(ticker);
+  const elapsed = Date.now() - startedAt;
+  R.elapsedMs = elapsed;
+
+  await new Promise(res => { recorder.onstop = res; recorder.stop(); });
+  stream.getTracks().forEach(t => t.stop());
+  log('recording stopped');
+
+  const blob = new Blob(chunks, { type: recorder.mimeType });
+  R.bytes = blob.size;
+  R.capturedMs = R.chunks.reduce((n, c) => n + Math.min(c.sincePrevMs, CHUNK_MS * 2), 0);
+
+  // Can it be seeked? Phase 3 playback depends on jumping to a highlight, and a
+  // MediaRecorder stream is not always a seekable file.
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio();
+  audio.preload = 'metadata';
+  audio.src = url;
+  await new Promise(res => {
+    audio.onloadedmetadata = res;
+    audio.onerror = res;
+    setTimeout(res, 4000);
+  });
+  R.reportedDuration = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : null;
+  if (R.reportedDuration) {
+    const target = audio.duration / 2;
+    audio.currentTime = target;
+    await new Promise(r => setTimeout(r, 600));
+    R.seek = { target: Math.round(target * 1000), landedAt: Math.round(audio.currentTime * 1000) };
+    R.seekable = Math.abs(audio.currentTime - target) < 1.5;
+  } else {
+    R.seekable = false;
+  }
+  URL.revokeObjectURL(url);
+
+  render();
+  $('copyBtn').disabled = false;
+}
+
+function render() {
+  const lostMs = R.holes.reduce((n, h) => n + h.ms, 0);
+  const pct = Math.round((R.elapsedMs - lostMs) / R.elapsedMs * 100);
+  const hidden = R.visibility.filter(v => v.hidden).length;
+
+  const rows = [
+    ['Recorded for', clock(R.elapsedMs), ''],
+    ['Times the page was hidden', hidden, ''],
+    ['Capture holes', R.holes.length, R.holes.length ? 'bad' : 'ok'],
+    ['Audio missing', clock(lostMs), lostMs ? 'bad' : 'ok'],
+    ['Coverage', pct + '%', pct >= 98 ? 'ok' : pct >= 80 ? 'warn' : 'bad'],
+    ['Size', (R.bytes / 1048576).toFixed(2) + ' MB', ''],
+    ['Per hour', ((R.bytes / R.elapsedMs) * 3600000 / 1048576).toFixed(0) + ' MB', ''],
+    ['Duration readable', R.reportedDuration ? clock(R.reportedDuration) : 'no',
+      R.reportedDuration ? 'ok' : 'warn'],
+    ['Seekable (Phase 3 needs this)', R.seekable ? 'yes' : 'no', R.seekable ? 'ok' : 'bad']
+  ];
+  if (R.holes.length) {
+    rows.push(['Holes at', R.holes.map(h => clock(h.from) + '–' + clock(h.to)).join(', '), 'bad']);
+  }
+  $('results').style.display = 'block';
+  $('stats').innerHTML = rows.map(r =>
+    '<div class="stat"><span>' + r[0] + '</span><b class="' + r[2] + '">' + r[1] + '</b></div>').join('');
+}
+
+function copyResults() {
+  const out = '## Recording survival\n```json\n' + JSON.stringify(R, null, 2) +
+              '\n```\n### Log\n```\n' + lines.join('\n') + '\n```';
+  $('log').textContent = out;
+  if (navigator.clipboard) navigator.clipboard.writeText(out)
+    .then(() => { $('copyBtn').textContent = 'Copied — paste into chat'; })
+    .catch(() => { $('copyBtn').textContent = 'Select the text below and copy'; });
+}
+</script>
+</body>
+</html>

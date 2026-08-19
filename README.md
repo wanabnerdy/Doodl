@@ -68,6 +68,15 @@ available. `probe/mic.html` reproduces the whole comparison.
 
 Repairs run when a session ends and when the app is foregrounded after being hidden.
 
+**The two microphone consumers must not share a policy.** Speech recognition causes
+the damage and dies on suspension anyway, so stopping it when the page is hidden is
+correct. A plain recording stream does not: holding one open causes ordinary
+contention that another app recovers from with a retry, exactly as any voice memo app
+does. Applying the recognition policy to a recorder would destroy the recording by our
+own hand — and a probe that stopped the recorder on hide would measure that policy
+while appearing to measure iOS. `probe/record.html` never stops the recorder itself,
+for that reason.
+
 **One case remains, and it is inherent.** Swiping away mid-session leaves the audio
 session damaged until you return to the app. Releasing recognition happens
 synchronously on the way out, but the repair needs an asynchronous microphone
