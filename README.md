@@ -8,8 +8,9 @@ Everything runs locally in the browser — no server, no API keys, no cost.
 
 ## Status
 
-**Phase 1 is built.** Canvas, background transcription, highlights, wrap-up screen,
-local session history.
+**Phase 1 is built and validated on the target device.** Canvas, background
+transcription, highlights, wrap-up screen, local session history — all exercised in
+real sessions on an iPhone, not only in tests.
 
 Phase 2 (audio recording) and Phase 3 (stroke-synced playback) are not started, but
 Phase 1 stores what Phase 3 needs: every stroke is a timestamped vector, so playback is
@@ -43,6 +44,36 @@ Safari 26.6), not what the APIs advertise:
 | Warm start with permission granted: 7 ms | Earlier multi-second "start-up" was permission dialogs |
 | Finalisation fires on a detected pause, 2.6 s after talking stopped | Anchoring must not wait for finals |
 | Trailing speech never finalised before stop | Unfinalised text is kept as provisional, not dropped |
+
+## The microphone problem
+
+Using the Web Speech API on iOS leaves the system audio session in a state other
+recording apps cannot recover from. Symptom: another app connects to the microphone,
+shows it as available, and receives no audio.
+
+This took five wrong theories to pin down. It is not how recognition is stopped, not
+how often it restarts, not Bluetooth, and not microphone use in general. Isolation
+testing on the device settled it:
+
+| Test | What it does | Other app's dictation afterwards |
+|---|---|---|
+| A | `getUserMedia` stream, opened and closed | **works** |
+| C | Speech recognition, cleanly torn down | **broken** |
+| D | Speech recognition, then A | **works** |
+
+So a plain stream is harmless *and* repairs what recognition damages. The app opens
+and closes one after recognition ends — see `resetAudioRoute` in `js/speech.js`.
+JavaScript cannot touch the audio session directly, so this is the only lever
+available. `probe/mic.html` reproduces the whole comparison.
+
+Repairs run when a session ends and when the app is foregrounded after being hidden.
+
+**One case remains, and it is inherent.** Swiping away mid-session leaves the audio
+session damaged until you return to the app. Releasing recognition happens
+synchronously on the way out, but the repair needs an asynchronous microphone
+request, and there is no window for that while the page is being suspended.
+Returning to the app fixes it — that is the first moment code can run again.
+Closing this case entirely would mean not using the Web Speech API.
 
 ## Running it
 
