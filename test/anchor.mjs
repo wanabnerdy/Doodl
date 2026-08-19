@@ -26,6 +26,10 @@ const SAMPLES = [
   [58908,153],[59437,166],[60099,170],[61286,179],[61818,184],[62771,203],[63463,219],
   [64441,223],[65395,234],[66126,243]
 ];
+// The second final reads as gibberish because the tester deliberately read the
+// passage backwards. Safari transcribed it faithfully — note "hole" for "whole" and
+// "beating" for "meeting", the recogniser falling back on homophones with no word
+// order to help it. Nothing here is broken; do not go looking for a parser bug.
 const FINALS = [
   [27623, 393, 'The quarterly numbers came in ahead of plan mostly on the back of renewals rather than new business engineering shipped the migration two weeks late which pushed the launch into the following month nobody was thrilled about that but the alternative was shipping something half finished for next quarter the priority is reducing churn in the mid market and we need a decision on pricing before the'],
   [67589, 259, 'Window hole the loose we again slips that if beating board before pricing on decisions and need we and market mid the in churn reducing is priority the quarter next for finished half something shipping was alternative the but that about thrilled was nobody month following the into launch the pushed which']
