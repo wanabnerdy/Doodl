@@ -20,9 +20,9 @@
 const SAMPLE_INTERVAL_MS = 250;
 const RESTART_DELAY_MS = 300;
 const STALE_AFTER_MS = 20000;
-const RELEASE_GRACE_MS = 700;
+const RELEASE_GRACE_MS = 700;     // long enough for a trailing final, short enough to feel instant
 const CHASER_MS = 400;
-const CHASER_TIMEOUT_MS = 2500;   // the reset is best-effort; it must never hang the wrap-up   // long enough for a trailing final, short enough to feel instant
+const CHASER_TIMEOUT_MS = 2500;   // the reset is best-effort; it must never hang the wrap-up
 
 export function createTranscriber({ now, onState, onUtterance, log }) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -31,6 +31,10 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
   let rec = null;
   let active = false;
   let resumeWhenVisible = false;
+  // Set the moment recognition starts and cleared by the repair. Damage outlives any
+  // particular recognition object, so whether a repair is owed cannot be decided by
+  // looking at whether one is currently running.
+  let routeDirty = false;
   let state = 'idle';
   let lastEventAt = 0;
   let lastSampleAt = -Infinity;
@@ -42,11 +46,11 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
   // other apps' dictation working, while speech recognition breaks it — same device,
   // same headset. JavaScript cannot touch the audio session directly, but opening and
   // closing a harmless stream afterwards may re-establish the route through the path
-  // that demonstrably works.
-  //
-  // Guarded on an already-granted permission: requesting the microphone when it is
-  // still in the 'prompt' state would throw a dialog at someone who just finished.
+  // that demonstrably works. Confirmed on the device: recognition alone broke another
+  // app's dictation, recognition followed by this did not.
   async function resetAudioRoute() {
+    if (!routeDirty) return;
+    routeDirty = false;
     // Only an explicit denial is a reason to skip. iOS tracks the speech-recognition
     // grant separately from getUserMedia, so this can still read 'prompt' after a
     // session that has been listening for minutes — and skipping on anything short of
@@ -199,6 +203,7 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     if (!rec) rec = build();
     try {
       rec.start();
+      routeDirty = true;
       lastEventAt = Date.now();
     } catch (err) {
       // 'already started' is harmless. Anything else: discard this object and let the
@@ -235,7 +240,9 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     resumeWhenVisible = false;
     say('speech: visible again, resuming');
     setState('starting');
-    start();
+    // Repair first. Hiding aborts recognition but has no window to run the reset, so
+    // the damage sits there until the user comes back — which is now.
+    resetAudioRoute().then(start, start);
   }
 
   return {
@@ -280,7 +287,13 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
       rec = null;
       setState('idle');
 
-      if (!dying) { flushPending(); return Promise.resolve(); }
+      // Nothing live to tear down — but recognition may have run earlier in this
+      // session and been aborted by the page being hidden. Returning early here meant
+      // a session finished after backgrounding never repaired the audio route at all.
+      if (!dying) {
+        flushPending();
+        return resetAudioRoute();
+      }
 
       dying.onend = () => say('speech: ended');   // detached from the restart path
       try { dying.stop(); } catch (e) { /* already stopped */ }

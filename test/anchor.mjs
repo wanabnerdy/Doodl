@@ -197,12 +197,26 @@ check(last && last.provisional && last.text.startsWith('and if that slips'),
 
   // Resuming builds a fresh recognition object, since the previous one was aborted.
   const beforeShow = startCount;
+  const chasersBeforeShow = chaserRuns;
   document.hidden = false;
   visibilityHandler();
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 800));
   check(startCount === beforeShow + 1, 'and resumes once the page is visible again',
         (startCount - beforeShow) + ' starts');
+  // Hiding aborts recognition but has no window to repair the route, so coming back
+  // is the first opportunity — otherwise the damage sits on the phone untouched.
+  check(chaserRuns === chasersBeforeShow + 1, 'returning to the app repairs the route',
+        (chaserRuns - chasersBeforeShow) + ' resets');
+
+  // Finishing after a background excursion must repair even though nothing is live:
+  // hiding nulled the recognition object, and an early return here left the damage.
+  document.hidden = true;
+  visibilityHandler();
+  const chasersBeforeEnd = chaserRuns;
   await bg.end();
+  check(chaserRuns === chasersBeforeEnd + 1,
+        'finishing repairs even when nothing is currently listening',
+        (chaserRuns - chasersBeforeEnd) + ' resets');
   document.hidden = false;
 }
 
