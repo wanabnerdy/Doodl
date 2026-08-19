@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#14161c">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <title>Doodl</title>
-<link rel="stylesheet" href="./css/app.css?v=111">
+<link rel="stylesheet" href="./css/app.css?v=112">
 </head>
 <body>
 
@@ -16,6 +16,9 @@
 <section id="home" class="screen active">
   <h1 class="brand">Doodl</h1>
   <p class="tagline">Doodle through the meeting. It listens, you tap the moments that matter.</p>
+  <p class="tool-note" style="margin:-14px 0 20px">A session holds the microphone until you
+    finish — through other apps and a locked screen. Tap the <b>listening</b> pill to hand it
+    to another app, and again to carry on.</p>
 
   <button class="big-btn" id="newSessionBtn">Start a session</button>
   <button class="big-btn ghost" id="quietSessionBtn">Doodle only — no microphone</button>
@@ -37,7 +40,7 @@
 
   <div class="hud">
     <button class="pill" id="endBtn">Finish</button>
-    <span class="pill status"><span class="dot" id="stateDot"></span><span id="stateText">off</span></span>
+    <button class="pill status" id="micBtn"><span class="dot" id="stateDot"></span><span id="stateText">off</span></button>
     <span class="pill spacer"></span>
     <button class="pill icon" id="undoBtn" aria-label="Undo">&#8630;</button>
     <button class="pill" id="toolsBtn">Tools</button>
@@ -88,6 +91,6 @@
 <div id="insetProbe"></div>
 <div id="debug"></div>
 
-<script type="module" src="./js/app.js?v=111"></script>
+<script type="module" src="./js/app.js?v=112"></script>
 </body>
 </html>

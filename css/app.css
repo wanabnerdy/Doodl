@@ -105,6 +105,7 @@ html, body {
 .dot.starting { background: var(--warn); animation: pulse 1s infinite; }
 .dot.listening { background: var(--live); }
 .dot.error { background: #ff6b6b; }
+.dot.paused { background: var(--dim); }
 @keyframes pulse { 50% { opacity: .25; } }
 
 .pill.icon { padding: 9px 13px; font-size: 17px; line-height: 1; }
@@ -138,6 +139,8 @@ html, body {
 
 .tool-row { margin-bottom: 18px; }
 .tool-row:last-child { margin-bottom: 0; }
+.tool-note { color: var(--dim); font-size: 13px; margin: 0; }
+.tool-note b { color: var(--fg); }
 .tool-row h4 { margin: 0 0 9px; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--dim); }
 
 .swatches { display: flex; gap: 10px; flex-wrap: wrap; }

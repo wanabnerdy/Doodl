@@ -16,6 +16,12 @@
 //  3. It never died unprompted in testing, but 20 seconds of continuous speech is a
 //     kind test. The watchdog restarts on death or on a long silence regardless, so
 //     endurance stops being something we have to be right about.
+//
+//  4. Listening continues while the page is hidden and while the screen is locked. A
+//     meeting does not stop because you glanced at your calendar. The microphone is
+//     held for the length of a session, as a voice recorder would, and handed back
+//     explicitly — on Finish, or on the pause control — with the audio route repaired
+//     each time.
 
 const SAMPLE_INTERVAL_MS = 250;
 const RESTART_DELAY_MS = 300;
@@ -30,7 +36,7 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
 
   let rec = null;
   let active = false;
-  let resumeWhenVisible = false;
+  let paused = false;
   // Set the moment recognition starts and cleared by the repair. Damage outlives any
   // particular recognition object, so whether a repair is owed cannot be decided by
   // looking at whether one is currently running.
@@ -168,14 +174,10 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
       say('speech: ended');
       closeSegment();
       flushPending();
-      if (!active) { setState('idle'); return; }
-      // Never grab the microphone back while the user is in another app — that is
-      // exactly when they are trying to use it for something else.
-      if (document.hidden) {
-        resumeWhenVisible = true;
-        say('speech: page hidden, holding off until it is visible again');
-        return;
-      }
+      if (!active || paused) { setState(paused ? 'paused' : 'idle'); return; }
+      // Restarts even with the page hidden. A meeting does not stop because the screen
+      // locked, and if iOS has frozen the page this timer will not fire anyway — so
+      // there is nothing lost by trying.
       setState('starting');
       setTimeout(start, RESTART_DELAY_MS);
     };
@@ -218,8 +220,7 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
   }
 
   function start() {
-    if (!active) return;
-    if (document.hidden) { resumeWhenVisible = true; return; }
+    if (!active || paused) return;
     if (!rec) rec = build();
     try {
       rec.start();
@@ -235,35 +236,33 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     }
   }
 
-  // Leaving the page is the moment to let go of the microphone. Holding it while the
-  // user is in another app is precisely what blocks that app from recording — and a
-  // timer-based release cannot be relied on, because iOS suspends timers in a
-  // backgrounded tab. This fires on the way out, while the page is still running.
-  function onVisibility() {
-    if (!active) return;
-
-    if (document.hidden) {
-      if (rec) {
-        const dying = rec;
-        rec = null;
-        dying.onend = dying.onresult = dying.onerror = dying.onstart = null;
-        try { dying.abort(); } catch (e) { /* nothing to abort */ }
-        closeSegment();
-        flushPending();
-        say('speech: page hidden — microphone released');
-      }
-      resumeWhenVisible = true;
-      setState('starting');
-      return;
+  // Releasing the microphone is an explicit act now, not something that happens
+  // whenever the user glances at another app. Holding it for the length of a session
+  // is ordinary contention — another app is told the microphone is busy and recovers
+  // on a retry — rather than the unrecoverable damage recognition leaves behind,
+  // which the repair below still handles.
+  function pause() {
+    if (!active || paused) return Promise.resolve();
+    paused = true;
+    const dying = rec;
+    rec = null;
+    setState('paused');
+    if (dying) {
+      dying.onend = dying.onresult = dying.onerror = dying.onstart = null;
+      try { dying.abort(); } catch (e) { /* nothing to abort */ }
+      closeSegment();
+      flushPending();
     }
+    say('speech: paused by request — microphone released');
+    return resetAudioRoute();
+  }
 
-    if (!resumeWhenVisible) return;
-    resumeWhenVisible = false;
-    say('speech: visible again, resuming');
+  function resume() {
+    if (!active || !paused) return;
+    paused = false;
+    say('speech: resumed');
     setState('starting');
-    // Repair first. Hiding aborts recognition but has no window to run the reset, so
-    // the damage sits there until the user comes back — which is now.
-    resetAudioRoute().then(start, start);
+    start();
   }
 
   return {
@@ -271,17 +270,19 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     utterances,
 
     get state() { return state; },
+    get paused() { return paused; },
+
+    pause,
+    resume,
 
     begin() {
       if (!SR || active) return;
       active = true;
-      resumeWhenVisible = false;
+      paused = false;
       setState('starting');
-      document.addEventListener('visibilitychange', onVisibility);
       start();
       watchdog = setInterval(() => {
         if (!active) return;
-        if (document.hidden) return;
         if (Date.now() - lastEventAt > STALE_AFTER_MS) {
           say('speech: silent too long, restarting');
           lastEventAt = Date.now();
@@ -299,10 +300,9 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
     // stop, keep listening briefly for that straggler, then abort and let go.
     end() {
       active = false;
-      resumeWhenVisible = false;
+      paused = false;
       clearInterval(watchdog);
       watchdog = null;
-      document.removeEventListener('visibilitychange', onVisibility);
 
       const dying = rec;
       rec = null;

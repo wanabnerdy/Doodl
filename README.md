@@ -66,7 +66,15 @@ and closes one after recognition ends — see `resetAudioRoute` in `js/speech.js
 JavaScript cannot touch the audio session directly, so this is the only lever
 available. `probe/mic.html` reproduces the whole comparison.
 
-Repairs run when a session ends and when the app is foregrounded after being hidden.
+Repairs run when a session ends and when listening is paused.
+
+**A session holds the microphone for its whole length**, through backgrounding and a
+locked screen, as a voice recorder does. An earlier build released it automatically
+whenever the page was hidden, which fixed contention at the cost of the feature: a
+meeting does not stop because you glanced at your calendar. Another app asking
+mid-session is told the microphone is busy and recovers on a retry — ordinary
+contention, not the unrecoverable state. Handing it over is explicit: tap the
+listening pill, or finish the session.
 
 **The two microphone consumers must not share a policy.** Speech recognition causes
 the damage and dies on suspension anyway, so stopping it when the page is hidden is

@@ -6,7 +6,7 @@ import * as store from './store.js';
 const COLORS = ['#232a33', '#2f6fd0', '#c8402f', '#1f8a53', '#8a4fbd', '#d98324'];
 const SIZES = [2.5, 4.5, 8, 14];          // css px, converted to normalised units per stroke
 const SAVE_INTERVAL_MS = 5000;
-const BUILD = 'v1.1.1';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+const BUILD = 'v1.2.0';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -144,6 +144,7 @@ function setSpeechState(state) {
   $('stateText').textContent =
     state === 'off' ? 'doodle only' :
     state === 'listening' ? 'listening' :
+    state === 'paused' ? 'paused — tap to resume' :
     state === 'starting' ? (micPending ? 'allow mic' : 'warming up') :
     state === 'error' ? 'no audio' : 'off';
 }
@@ -564,6 +565,13 @@ $('newSessionBtn').onclick = () => startSession(true);
 $('quietSessionBtn').onclick = () => startSession(false);
 $('endBtn').onclick = () => { if (confirm('Finish this session?')) endSession(); };
 $('highlightBtn').onclick = addHighlight;
+// The microphone is held for the whole session. This hands it to another app without
+// ending the session, and takes it back again.
+$('micBtn').onclick = async () => {
+  if (!transcriber || !transcriber.supported) return;
+  if (transcriber.paused) transcriber.resume();
+  else await transcriber.pause();
+};
 $('undoBtn').onclick = () => { S.undo(drawing); repaintInk(); };
 $('clearBtn').onclick = () => { if (confirm('Clear the whole page?')) { S.clear(drawing); repaintInk(); closeTools(); } };
 $('toolsBtn').onclick = () => $('tools').classList.toggle('open');

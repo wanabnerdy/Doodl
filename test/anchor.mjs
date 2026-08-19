@@ -174,50 +174,42 @@ check(t.utterances.length === 3, 'unfinalised trailing speech is kept, not lost'
 check(last && last.provisional && last.text.startsWith('and if that slips'),
       'and is marked provisional so the wrap-up can flag it');
 
-// Reclaiming the microphone while the user is in another app is the behaviour most
-// likely to leave a different dictation app unable to record.
+// Listening must continue while the page is hidden. A meeting does not stop because
+// the screen locked, and the previous release-on-hide policy is what made recording
+// impossible to add later: the same policy applied to a recorder destroys the
+// recording by our own hand, whatever iOS would have permitted.
 {
   const bg = createTranscriber({ now: () => 0, onState: () => {}, log: () => {} });
   bg.begin();
   const inst = instance;
 
-  // Backgrounding must actively release the microphone, not merely decline to
-  // reacquire it: a timer-based release never runs, because iOS suspends timers in a
-  // backgrounded tab, and the mic stays held while the user is in another app.
-  let aborted = false;
-  inst.abort = () => { aborted = true; };
+  const before = startCount;
+  const chasersBefore = chaserRuns;
   document.hidden = true;
-  visibilityHandler();
-  check(aborted, 'backgrounding releases the microphone immediately');
+  inst.onend();                        // recognition drops while backgrounded
+  await new Promise(r => setTimeout(r, 600));
+  check(startCount === before + 1, 'a hidden page keeps listening', 'restarted');
+  check(chaserRuns === chasersBefore, 'and does not release the microphone on its own',
+        (chaserRuns - chasersBefore) + ' releases');
 
-  const afterHide = startCount;
-  await new Promise(r => setTimeout(r, 500));
-  check(startCount === afterHide, 'and does not grab it back while still in the background',
-        (startCount - afterHide) + ' starts');
-
-  // Resuming builds a fresh recognition object, since the previous one was aborted.
-  const beforeShow = startCount;
-  const chasersBeforeShow = chaserRuns;
+  // Handing the microphone over is now something the user asks for.
   document.hidden = false;
-  visibilityHandler();
-  await new Promise(r => setTimeout(r, 800));
-  check(startCount === beforeShow + 1, 'and resumes once the page is visible again',
-        (startCount - beforeShow) + ' starts');
-  // Hiding aborts recognition but has no window to repair the route, so coming back
-  // is the first opportunity — otherwise the damage sits on the phone untouched.
-  check(chaserRuns === chasersBeforeShow + 1, 'returning to the app repairs the route',
-        (chaserRuns - chasersBeforeShow) + ' resets');
+  const chasersBeforePause = chaserRuns;
+  await bg.pause();
+  check(bg.paused, 'pausing stops listening');
+  check(chaserRuns === chasersBeforePause + 1, 'and repairs the audio route on the way out',
+        (chaserRuns - chasersBeforePause) + ' repairs');
 
-  // Finishing after a background excursion must repair even though nothing is live:
-  // hiding nulled the recognition object, and an early return here left the damage.
-  document.hidden = true;
-  visibilityHandler();
-  const chasersBeforeEnd = chaserRuns;
+  // Pausing detaches the handlers outright, so nothing is left that could restart it.
+  const beforeResume = startCount;
+  await new Promise(r => setTimeout(r, 600));
+  check(startCount === beforeResume, 'a paused session stays quiet',
+        (startCount - beforeResume) + ' starts');
+
+  bg.resume();
+  await new Promise(r => setTimeout(r, 200));
+  check(!bg.paused && startCount > beforeResume, 'and resumes when asked');
   await bg.end();
-  check(chaserRuns === chasersBeforeEnd + 1,
-        'finishing repairs even when nothing is currently listening',
-        (chaserRuns - chasersBeforeEnd) + ' resets');
-  document.hidden = false;
 }
 
 // Coverage is what tells a quiet room apart from a deaf app, so the arithmetic has
