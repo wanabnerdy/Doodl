@@ -92,7 +92,16 @@ const sheetOk = await page.evaluate(() => {
 });
 note(sheetOk, 'Clear is reachable inside the tool sheet');
 await page.click('#toolsDone');
-await page.waitForTimeout(300);
+await page.waitForTimeout(400);
+
+// Closed, the sheet parks just below the app box. Unless it is clipped it shows
+// through underneath, which reads as controls sitting under the address bar.
+const clipped = await page.evaluate(() => {
+  const sheet = document.getElementById('tools').getBoundingClientRect();
+  return getComputedStyle(document.getElementById('session')).overflow === 'hidden'
+      && sheet.top >= window.innerHeight - 1;
+});
+note(clipped, 'the closed tool sheet is clipped, not spilling below the app');
 
 // --- highlights -----------------------------------------------------------
 await page.click('#highlightBtn');

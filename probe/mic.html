@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Doodl — Microphone Isolation</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#262b36; --fg:#e7eaf0; --dim:#949cad;
+          --ok:#46d17f; --bad:#ff6b6b; --accent:#6ea8fe; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; padding:16px 14px 50px; background:var(--bg); color:var(--fg);
+         font:15px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  h1 { font-size:19px; margin:0 0 6px; }
+  .sub { color:var(--dim); font-size:13px; margin:0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:16px; margin-bottom:14px; }
+  .card h2 { font-size:16px; margin:0 0 4px; }
+  .card p { color:var(--dim); font-size:13px; margin:0 0 12px; }
+  button { appearance:none; border:1px solid var(--line); background:#222735; color:var(--fg);
+           font:600 15px/1 inherit; padding:15px; border-radius:11px; width:100%; }
+  button.primary { background:var(--accent); color:#0f1115; border-color:var(--accent); }
+  button:disabled { opacity:.4; }
+  .verdict { display:flex; gap:8px; margin-top:10px; }
+  .verdict button { font-size:14px; padding:13px 8px; }
+  .verdict button.good { border-color:var(--ok); color:var(--ok); }
+  .verdict button.bad  { border-color:var(--bad); color:var(--bad); }
+  .state { font-size:13px; margin-top:10px; color:var(--dim); }
+  .state.done { color:var(--fg); }
+  .tag { display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase;
+         letter-spacing:.4px; padding:3px 8px; border-radius:99px; margin-left:6px; }
+  .tag.good { background:var(--ok); color:#0f1115; }
+  .tag.bad { background:var(--bad); color:#0f1115; }
+  a.back { display:block; padding:14px; margin-bottom:14px; text-align:center; text-decoration:none;
+           background:#ffb347; color:#1a1206; border-radius:10px; font-weight:700; }
+  pre { background:#10131a; border:1px solid var(--line); border-radius:10px; padding:10px;
+        font-size:11px; overflow:auto; color:var(--dim); white-space:pre-wrap; }
+</style>
+</head>
+<body>
+
+<a class="back" href="../">&larr; This is a test page. Go to the Doodl app</a>
+
+<h1>Which one breaks the microphone?</h1>
+<p class="sub">Three different ways a web page can use the mic. Run <b>one</b>, then switch to your dictation app and try to talk. Come back and record what happened. Force-quit and reopen the dictation app between tests so each one starts clean.</p>
+
+<div class="card">
+  <h2>A · Microphone stream only<span id="tag-a"></span></h2>
+  <p>Opens the mic for 5 seconds and closes it. No recording, no recognition. The plainest possible use.</p>
+  <button onclick="runA()" id="btn-a">Run test A</button>
+  <div class="state" id="st-a">Not run</div>
+  <div class="verdict" id="v-a" style="display:none">
+    <button class="good" onclick="verdict('A', true)">Dictation still works</button>
+    <button class="bad" onclick="verdict('A', false)">Dictation broken</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>B · Recording<span id="tag-b"></span></h2>
+  <p>Records 5 seconds of audio with MediaRecorder, then stops and closes the mic. This is what Phase 2 would use.</p>
+  <button onclick="runB()" id="btn-b">Run test B</button>
+  <div class="state" id="st-b">Not run</div>
+  <div class="verdict" id="v-b" style="display:none">
+    <button class="good" onclick="verdict('B', true)">Dictation still works</button>
+    <button class="bad" onclick="verdict('B', false)">Dictation broken</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>C · Speech recognition<span id="tag-c"></span></h2>
+  <p>Runs speech recognition for 5 seconds, then stops and aborts it. This is what the app does today.</p>
+  <button onclick="runC()" id="btn-c">Run test C</button>
+  <div class="state" id="st-c">Not run</div>
+  <div class="verdict" id="v-c" style="display:none">
+    <button class="good" onclick="verdict('C', true)">Dictation still works</button>
+    <button class="bad" onclick="verdict('C', false)">Dictation broken</button>
+  </div>
+</div>
+
+<button class="primary" onclick="copyResults()">Copy results</button>
+<pre id="out" style="display:none"></pre>
+
+<script>
+const R = { ua: navigator.userAgent, tests: {} };
+const $ = id => document.getElementById(id);
+
+function state(k, msg, done) {
+  const el = $('st-' + k.toLowerCase());
+  el.textContent = msg;
+  el.className = 'state' + (done ? ' done' : '');
+}
+function finished(k, detail) {
+  R.tests[k] = Object.assign({ ran: true }, detail);
+  state(k, 'Done — now switch to your dictation app and try it, then come back.', true);
+  $('v-' + k.toLowerCase()).style.display = 'flex';
+  $('btn-' + k.toLowerCase()).disabled = true;
+}
+function verdict(k, ok) {
+  R.tests[k] = Object.assign(R.tests[k] || {}, { dictationStillWorks: ok });
+  const tag = $('tag-' + k.toLowerCase());
+  tag.className = 'tag ' + (ok ? 'good' : 'bad');
+  tag.textContent = ok ? 'harmless' : 'breaks it';
+  state(k, ok ? 'Recorded: dictation survived this one.'
+             : 'Recorded: this one broke dictation.', true);
+}
+
+// A — the plainest possible microphone use
+async function runA() {
+  state('A', 'Opening the microphone…');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    setTimeout(() => {
+      stream.getTracks().forEach(t => t.stop());
+      finished('A', { tracksStopped: true });
+    }, 5000);
+    state('A', 'Microphone open — closing in 5 seconds…');
+  } catch (e) {
+    state('A', 'Failed: ' + e.name + ' — ' + e.message, true);
+    R.tests.A = { ran: true, error: e.name };
+  }
+}
+
+// B — what Phase 2 would do
+async function runB() {
+  state('B', 'Opening the microphone…');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mr = new MediaRecorder(stream);
+    const chunks = [];
+    mr.ondataavailable = e => chunks.push(e.data);
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      finished('B', { bytes: new Blob(chunks).size });
+    };
+    mr.start();
+    state('B', 'Recording — stopping in 5 seconds…');
+    setTimeout(() => mr.stop(), 5000);
+  } catch (e) {
+    state('B', 'Failed: ' + e.name + ' — ' + e.message, true);
+    R.tests.B = { ran: true, error: e.name };
+  }
+}
+
+// C — what the app does today, teardown and all
+function runC() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { state('C', 'Speech recognition unavailable here.', true); return; }
+  const rec = new SR();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = 'en-US';
+  let finals = 0;
+  rec.onresult = e => {
+    for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) finals++;
+  };
+  rec.onerror = e => { R.tests.C = Object.assign(R.tests.C || {}, { error: e.error }); };
+  state('C', 'Listening — stopping in 5 seconds…');
+  try { rec.start(); } catch (e) { state('C', 'start threw: ' + e.message, true); return; }
+
+  setTimeout(() => {
+    try { rec.stop(); } catch (e) {}
+    // same teardown the app performs
+    setTimeout(() => {
+      rec.onresult = rec.onerror = rec.onend = rec.onstart = null;
+      try { rec.abort(); } catch (e) {}
+      finished('C', { finals });
+    }, 700);
+  }, 5000);
+}
+
+function copyResults() {
+  const text = '## Microphone isolation\n```json\n' + JSON.stringify(R, null, 2) + '\n```';
+  $('out').style.display = 'block';
+  $('out').textContent = text;
+  if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+}
+</script>
+</body>
+</html>
