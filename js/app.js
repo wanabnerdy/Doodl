@@ -6,7 +6,7 @@ import * as store from './store.js';
 const COLORS = ['#232a33', '#2f6fd0', '#c8402f', '#1f8a53', '#8a4fbd', '#d98324'];
 const SIZES = [2.5, 4.5, 8, 14];          // css px, converted to normalised units per stroke
 const SAVE_INTERVAL_MS = 5000;
-const BUILD = 'v1.1.0';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+const BUILD = 'v1.1.1';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -355,6 +355,7 @@ function renderWrap(s) {
   }
 
   $('shareBtn').onclick = () => exportSession(s);
+  $('diagBtn').onclick = () => copyDiagnostics(s);
   $('deleteBtn').onclick = async () => {
     if (!confirm('Delete this session permanently?')) return;
     await store.deleteSession(s.id);
@@ -427,6 +428,47 @@ async function exportSession(s) {
   } catch (e) {
     await navigator.clipboard.writeText(text);
     alert('Copied the session to the clipboard.');
+  }
+}
+
+// Everything needed to tell a quiet room from a deaf app, in one paste. Screenshots
+// of a scrolled transcript cannot show coverage, timings and the speech log at once.
+function copyDiagnostics(s) {
+  const dur = s.endedAt ? s.endedAt - s.startedAt : 0;
+  const lines = ['## Doodl diagnostics', BUILD, ''];
+  lines.push('Session ' + s.id + '  ·  length ' + clock(dur));
+
+  if (s.coverage) {
+    const c = s.coverage;
+    lines.push('Listening ' + clock(c.listeningMs) + ' of ' + clock(c.totalMs) +
+               ' (' + Math.round(c.listeningMs / c.totalMs * 100) + '%)');
+    lines.push('Gaps: ' + (c.gaps.length
+      ? c.gaps.map(g => clock(g.from) + '\u2013' + clock(g.to)).join(', ')
+      : 'none'));
+  } else {
+    lines.push('Coverage: not recorded (session predates this build)');
+  }
+
+  lines.push('', 'Utterances (' + (s.utterances || []).length + '):');
+  for (const u of (s.utterances || [])) {
+    lines.push('  ' + clock(u.startT) + '\u2013' + clock(u.endT) + '  ' +
+               String(u.text.length).padStart(4) + ' chars' +
+               (u.provisional ? '  PARTIAL' : '') +
+               '  samples:' + (u.samples ? u.samples.length : 0));
+  }
+
+  lines.push('', 'Highlights: ' +
+    (s.highlights.length ? s.highlights.map(h => clock(h.t)).join(', ') : 'none'));
+  lines.push('', 'Speech log:', ...debugLines.slice(-80));
+
+  const text = lines.join('\n');
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text)
+      .then(() => alert('Diagnostics copied — paste them into the chat.'))
+      .catch(() => { $('debug').classList.add('open'); $('debug').textContent = text; });
+  } else {
+    $('debug').classList.add('open');
+    $('debug').textContent = text;
   }
 }
 

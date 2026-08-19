@@ -127,14 +127,18 @@ export function createTranscriber({ now, onState, onUtterance, log }) {
       const t = now();
       let interim = '';
 
+      // Finals only from resultIndex — anything earlier is already committed, and
+      // re-reading it would duplicate.
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        const result = e.results[i];
-        const text = result[0].transcript;
-        if (result.isFinal) {
-          commit(text.trim(), t);
-        } else {
-          interim += text;
-        }
+        if (e.results[i].isFinal) commit(e.results[i][0].transcript.trim(), t);
+      }
+
+      // Interim text, however, is gathered from every unfinalised result rather than
+      // from resultIndex onwards. resultIndex marks what CHANGED in this event, so an
+      // in-progress result sitting before it would be dropped, silently truncating
+      // whatever ends up flushed as partial text.
+      for (let i = 0; i < e.results.length; i++) {
+        if (!e.results[i].isFinal) interim += e.results[i][0].transcript;
       }
 
       if (interim) {
