@@ -59,6 +59,23 @@ export function createTranscriber({ now, onState, onUtterance, onRelease, log })
   // closing a harmless stream afterwards may re-establish the route through the path
   // that demonstrably works. Confirmed on the device: recognition alone broke another
   // app's dictation, recognition followed by this did not.
+  // Every microphone stream this module opens, so none can be orphaned. A stream with
+  // no reference cannot be stopped, and on iOS an unstopped stream keeps the recording
+  // indicator lit until the tab is closed.
+  const openStreams = new Set();
+
+  function track(stream) {
+    openStreams.add(stream);
+    return stream;
+  }
+
+  function closeAll() {
+    for (const s2 of openStreams) {
+      try { s2.getTracks().forEach(t => t.stop()); } catch (e) { /* already stopped */ }
+    }
+    openStreams.clear();
+  }
+
   async function resetAudioRoute() {
     if (!routeDirty) return;
     routeDirty = false;
@@ -75,10 +92,16 @@ export function createTranscriber({ now, onState, onUtterance, onRelease, log })
     // Bounded: on a device with no microphone, or where the request stalls awaiting a
     // decision, this would otherwise sit between the user tapping Finish and their
     // session appearing.
-    let stream = null;
+    // Cleanup is attached to the request itself, not to the race. Losing the race
+    // used to leave the arriving stream with no reference and nothing to stop it —
+    // it then stayed live for the lifetime of the page, keeping the phone's
+    // recording indicator lit long after the session ended, until Safari was closed.
+    const request = navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(s => { track(s); return s; });
+
     try {
-      stream = await Promise.race([
-        navigator.mediaDevices.getUserMedia({ audio: true }),
+      await Promise.race([
+        request,
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error('timeout')), CHASER_TIMEOUT_MS))
       ]);
@@ -87,8 +110,10 @@ export function createTranscriber({ now, onState, onUtterance, onRelease, log })
     } catch (e) {
       say('speech: route reset skipped — ' + (e.name === 'Error' ? e.message : e.name));
     } finally {
-      // The request may still land after the race is lost; close it either way.
-      if (stream) stream.getTracks().forEach(t => t.stop());
+      // Whoever won the race, every stream this module opened is closed here — and
+      // the request keeps its own cleanup for the case where it arrives after this.
+      request.then(closeAll, () => {});
+      closeAll();
       // The repair is itself a microphone request, so the indicator lights up again
       // for a moment after finishing. Callers can say so rather than leave the user
       // wondering whether the app let go.
@@ -326,6 +351,7 @@ export function createTranscriber({ now, onState, onUtterance, onRelease, log })
       // a session finished after backgrounding never repaired the audio route at all.
       if (!dying) {
         flushPending();
+        closeAll();
         return resetAudioRoute();
       }
 

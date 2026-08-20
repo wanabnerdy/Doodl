@@ -46,6 +46,8 @@ class FakeRecognition {
 globalThis.window = { SpeechRecognition: FakeRecognition };
 // speech.js checks visibility before reclaiming the microphone, so the stub needs it
 let chaserRuns = 0;
+let gumDelayMs = 0;              // how long the microphone request takes to arrive
+const openedTracks = [];         // every track handed out, so leaks are detectable
 let permissionState = 'prompt';   // iOS may report this even mid-session
 // Node supplies its own read-only navigator, so it has to be defined over.
 Object.defineProperty(globalThis, 'navigator', {
@@ -53,7 +55,13 @@ Object.defineProperty(globalThis, 'navigator', {
   value: {
     permissions: { query: async () => ({ state: permissionState }) },
     mediaDevices: {
-      getUserMedia: async () => { chaserRuns++; return { getTracks: () => [{ stop() {} }] }; }
+      getUserMedia: async () => {
+        chaserRuns++;
+        if (gumDelayMs) await new Promise(r => setTimeout(r, gumDelayMs));
+        const track = { stopped: false, stop() { this.stopped = true; } };
+        openedTracks.push(track);
+        return { getTracks: () => [track] };
+      }
     }
   }
 });
@@ -220,6 +228,22 @@ check(last && last.provisional && last.text.startsWith('and if that slips'),
   await new Promise(r => setTimeout(r, 200));
   check(!bg.paused && startCount > beforeResume, 'and resumes when asked');
   await bg.end();
+}
+
+// The leak that kept the phone's recording indicator lit for half an hour after a
+// session ended, until Safari was closed. The repair's microphone request lost its
+// race against the timeout, and the stream that arrived afterwards had no reference
+// left to stop it. Cleanup must belong to the request, not to whoever won.
+{
+  gumDelayMs = 3000;                       // arrives after the 2500 ms timeout
+  const slow = createTranscriber({ now: () => 0, onState: () => {}, log: () => {} });
+  slow.begin();
+  await slow.end();
+  await new Promise(r => setTimeout(r, 4000));
+  const leaked = openedTracks.filter(t => !t.stopped);
+  check(leaked.length === 0, 'a stream arriving after the timeout is still closed',
+        leaked.length + ' left open');
+  gumDelayMs = 0;
 }
 
 // Coverage is what tells a quiet room apart from a deaf app, so the arithmetic has
