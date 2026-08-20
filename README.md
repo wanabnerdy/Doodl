@@ -68,6 +68,15 @@ available. `probe/mic.html` reproduces the whole comparison.
 
 Repairs run when a session ends and when listening is paused.
 
+The repair races its microphone request against a timeout so it can never hold up the
+wrap-up, and **the cleanup belongs to the request, not to whichever promise wins**. An
+earlier version assigned the stream only when the request won, so a slow request — a
+Bluetooth headset renegotiating, for instance — left an arriving stream with no
+reference and nothing to stop it. It stayed live for the lifetime of the page, keeping
+the phone's recording indicator lit until Safari was closed. The comment above that
+code claimed the late arrival was handled, which is why re-reading it never revealed
+the fault.
+
 **A session holds the microphone for its whole length**, through backgrounding and a
 locked screen, as a voice recorder does. An earlier build released it automatically
 whenever the page was hidden, which fixed contention at the cost of the feature: a
