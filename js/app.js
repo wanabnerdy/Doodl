@@ -12,7 +12,7 @@ const SAVE_INTERVAL_MS = 5000;
 // narrow. Wider, and someone who sketches with a finger and then picks up the pen
 // loses the work they just did.
 const PALM_WINDOW_MS = 800;
-const BUILD = 'v1.3.1';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+const BUILD = 'v1.4.0';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -423,6 +423,7 @@ function renderWrap(s) {
 
   setupAudio(s);
 
+  $('replayBtn').onclick = () => openReplay(s);
   $('shareBtn').onclick = () => exportSession(s);
   $('diagBtn').onclick = () => copyDiagnostics(s);
   $('deleteBtn').onclick = async () => {
@@ -643,6 +644,132 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && session && !session.endedAt && !wakeLock) requestWakeLock();
 });
 
+/* --------------------------------------------------------------- replay */
+
+// The doodle redrawing itself in step with the audio — what the brief calls the
+// visual soundtrack. It needs nothing new from the data: strokes have carried
+// timestamps since the first build, and render() already takes an 'up to time T'
+// argument. This is the wiring that was always implied.
+
+const SPEEDS = [1, 1.5, 2, 0.5];
+
+let replay = null;
+
+async function openReplay(s) {
+  const total = (s.endedAt || 0) - (s.startedAt || 0);
+  if (!total) return;
+
+  const rBg = $('rBg'), rInk = $('rInk');
+  const bgCtx = rBg.getContext('2d'), inkCtx = rInk.getContext('2d');
+  const drawingData = { strokes: s.strokes || [], live: null };
+
+  replay = { s, total, raf: null, audio: null, speedIndex: 0, virtualT: 0, playing: false, lastFrame: 0 };
+
+  show('replay');
+  sizeReplay();
+
+  // Audio drives the clock when there is any; otherwise a plain timer does, so a
+  // doodle-only session still replays.
+  if (s.audio && s.audio.chunks) {
+    const blob = await store.getAudioBlob(s.id, s.audio.mimeType);
+    if (blob && blob.size) {
+      const p = await createPlayer(blob);
+      replay.audio = p;
+      p.audio.onended = () => { replay.playing = false; paintTransport(); };
+    }
+  }
+
+  $('rScrub').max = String(total);
+  $('rScrub').value = '0';
+
+  // Highlight positions, so a moment worth revisiting is visible on the timeline.
+  $('rPips').innerHTML = (s.highlights || [])
+    .map(h => '<i style="left:' + (h.t / total * 100).toFixed(2) + '%"></i>').join('');
+
+  function sizeReplay() {
+    const rect = $('replay').getBoundingClientRect();
+    replay.w = rect.width;
+    replay.h = rect.height;
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    for (const [c, ctx] of [[rBg, bgCtx], [rInk, inkCtx]]) {
+      c.width = Math.round(rect.width * dpr);
+      c.height = Math.round(rect.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    paintBackground(bgCtx, s.background, rect.width, rect.height);
+  }
+  replay.resize = sizeReplay;
+
+  function positionMs() {
+    if (replay.audio) {
+      return Math.round(replay.audio.audio.currentTime * 1000) + ((s.audio && s.audio.startedAt) || 0);
+    }
+    return replay.virtualT;
+  }
+
+  function paintFrame() {
+    const t = Math.min(positionMs(), replay.total);
+    inkCtx.clearRect(0, 0, replay.w, replay.h);
+    // Everything drawn at or before this instant, and nothing after.
+    S.render(inkCtx, drawingData, replay.w, t);
+    $('rClock').textContent = clock(t) + ' / ' + clock(replay.total);
+    const scrub = $('rScrub');
+    if (!scrub.matches(':active')) scrub.value = String(Math.max(0, t));
+  }
+  replay.paintFrame = paintFrame;
+
+  function paintTransport() {
+    $('rPlay').innerHTML = replay.playing ? '&#10074;&#10074;' : '&#9654;';
+  }
+  replay.paintTransport = paintTransport;
+
+  function frame(now2) {
+    if (!replay) return;
+    if (replay.playing && !replay.audio) {
+      const dt = replay.lastFrame ? now2 - replay.lastFrame : 0;
+      replay.virtualT += dt * SPEEDS[replay.speedIndex];
+      if (replay.virtualT >= replay.total) { replay.virtualT = replay.total; replay.playing = false; paintTransport(); }
+    }
+    replay.lastFrame = now2;
+    paintFrame();
+    replay.raf = requestAnimationFrame(frame);
+  }
+  replay.raf = requestAnimationFrame(frame);
+
+  paintFrame();
+  paintTransport();
+}
+
+function replaySeek(ms) {
+  if (!replay) return;
+  const s = replay.s;
+  if (replay.audio) {
+    const audioPos = Math.max(0, ms - ((s.audio && s.audio.startedAt) || 0));
+    try { replay.audio.audio.currentTime = audioPos / 1000; } catch (e) { /* not seekable */ }
+  } else {
+    replay.virtualT = ms;
+  }
+  replay.paintFrame();
+}
+
+function replayToggle() {
+  if (!replay) return;
+  replay.playing = !replay.playing;
+  if (replay.audio) {
+    if (replay.playing) replay.audio.audio.play(); else replay.audio.audio.pause();
+  }
+  replay.lastFrame = 0;
+  replay.paintTransport();
+}
+
+function closeReplay() {
+  if (!replay) return;
+  cancelAnimationFrame(replay.raf);
+  if (replay.audio) replay.audio.destroy();
+  replay = null;
+  show('wrap');
+}
+
 /* ---------------------------------------------------------------- tools */
 
 function buildTools() {
@@ -724,6 +851,16 @@ $('toolsDone').onclick = closeTools;
 $('palmBtn').onclick = () => { rejectPalm = !rejectPalm; updatePenPill(); };
 $('homeBtn').onclick = goHome;
 $('debugToggle').onclick = () => $('debug').classList.toggle('open');
+$('rBack').onclick = closeReplay;
+$('rPlay').onclick = replayToggle;
+$('rScrub').oninput = e => replaySeek(Number(e.target.value));
+$('rSpeed').onclick = () => {
+  if (!replay) return;
+  replay.speedIndex = (replay.speedIndex + 1) % SPEEDS.length;
+  const rate = SPEEDS[replay.speedIndex];
+  if (replay.audio) replay.audio.audio.playbackRate = rate;
+  $('rSpeed').innerHTML = rate + '&times;';
+};
 
 // iOS Safari's address bar overlays the window, so window.innerHeight lies about what
 // is visible and CSS viewport units only approximate it. visualViewport reports the
@@ -743,6 +880,7 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener('scroll', applyViewport);
 }
 window.addEventListener('resize', applyViewport);
+window.addEventListener('resize', () => { if (replay) { replay.resize(); replay.paintFrame(); } });
 window.addEventListener('orientationchange', () => setTimeout(() => { if (drawing) sizeCanvases(); }, 250));
 // Closing the tab or navigating away has to free the microphone as well, or it stays
 // held by Safari and no other app can record.

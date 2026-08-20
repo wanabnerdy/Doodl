@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#14161c">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <title>Doodl</title>
-<link rel="stylesheet" href="./css/app.css?v=116">
+<link rel="stylesheet" href="./css/app.css?v=117">
 </head>
 <body>
 
@@ -93,16 +93,38 @@
   <p class="section-label">Full transcript</p>
   <div class="transcript" id="transcriptBox"></div>
 
-  <button class="big-btn" id="shareBtn" style="margin-top:22px">Export</button>
+  <button class="big-btn" id="replayBtn" style="margin-top:22px">Replay the session</button>
+  <button class="big-btn ghost" id="shareBtn">Export</button>
   <button class="big-btn ghost" id="diagBtn">Copy diagnostics</button>
   <button class="big-btn ghost" id="homeBtn">Back to sessions</button>
   <button class="big-btn ghost" id="deleteAudioBtn" style="display:none">Delete audio, keep the notes</button>
   <button class="big-btn ghost" id="deleteBtn" style="color:#ff8080">Delete this session</button>
 </section>
 
+<!-- replay ------------------------------------------------------------- -->
+<section id="replay" class="screen">
+  <canvas id="rBg"></canvas>
+  <canvas id="rInk"></canvas>
+
+  <div class="hud">
+    <button class="pill" id="rBack">Done</button>
+    <span class="pill spacer"></span>
+    <span class="pill" id="rClock">00:00</span>
+  </div>
+
+  <div class="transport">
+    <button class="play" id="rPlay" aria-label="Play">&#9654;</button>
+    <div class="track">
+      <input type="range" id="rScrub" min="0" max="1000" value="0">
+      <div class="pips" id="rPips"></div>
+    </div>
+    <button class="pill" id="rSpeed">1&times;</button>
+  </div>
+</section>
+
 <div id="insetProbe"></div>
 <div id="debug"></div>
 
-<script type="module" src="./js/app.js?v=116"></script>
+<script type="module" src="./js/app.js?v=117"></script>
 </body>
 </html>

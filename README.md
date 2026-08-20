@@ -18,6 +18,12 @@ played back and contains real sound — verified by listening, which is the only
 that question could be answered. Still untested: a long session, where memory,
 battery and thermals would show up and 85 seconds tells you nothing.
 
+**Phase 3 is built, pending device testing.** The doodle redraws itself in step with
+the audio: a full-screen replay with a scrubbable timeline, highlight moments marked
+on it, and playback speed. It needed nothing new from the data — strokes have carried
+timestamps since the first build, and the renderer already accepted an "up to time T"
+argument. A session with no audio replays on a plain timer instead.
+
 Audio records alongside the session and
 is written to storage in five-second chunks as it happens, so a long meeting costs
 disk rather than memory and a crash loses seconds. The wrap-up plays it back, each

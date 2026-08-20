@@ -221,6 +221,42 @@ const stored = await page.evaluate(async () => {
 });
 note(stored > 0, 'chunks were written to storage during the session', stored + ' chunks');
 
+// --- replay ---------------------------------------------------------------
+// The doodle redrawing in step with the audio. The check that matters is that the
+// canvas actually differs across the timeline: identical frames would mean the
+// timestamps are being ignored and the whole drawing is painted at once.
+await page.click('#replayBtn');
+await page.waitForTimeout(2500);
+note(await page.locator('#replay.active').count() === 1, 'replay opens');
+
+const frames = await page.evaluate(async () => {
+  const scrub = document.getElementById('rScrub');
+  const ink = document.getElementById('rInk');
+  const grab = async v => {
+    scrub.value = String(v);
+    scrub.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 350));
+    return ink.toDataURL();
+  };
+  const max = Number(scrub.max);
+  return {
+    max,
+    start: await grab(0),
+    middle: await grab(Math.round(max * 0.5)),
+    end: await grab(max),
+    pips: document.querySelectorAll('#rPips i').length
+  };
+});
+
+note(frames.max > 1000, 'the timeline spans the session', frames.max + ' ms');
+note(frames.start !== frames.end, 'the drawing builds up over the timeline');
+note(frames.middle !== frames.end, 'and is genuinely partway through in the middle');
+note(frames.pips === 2, 'highlights are marked on the timeline', frames.pips + ' pips');
+
+await page.click('#rBack');
+await page.waitForTimeout(400);
+note(await page.locator('#wrap.active').count() === 1, 'and returns to the wrap-up');
+
 // --- console --------------------------------------------------------------
 const real = consoleErrors.filter(e => !/speech|SpeechRecognition|not-allowed|network/i.test(e));
 note(real.length === 0, 'no unexpected console errors', real.slice(0, 3).join(' | '));
