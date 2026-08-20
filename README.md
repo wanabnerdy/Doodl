@@ -12,7 +12,13 @@ Everything runs locally in the browser — no server, no API keys, no cost.
 transcription, highlights, wrap-up screen, local session history — all exercised in
 real sessions on an iPhone, not only in tests.
 
-**Phase 2 is built, pending device testing.** Audio records alongside the session and
+**Phase 2 is built and confirmed on the device.** Playback works, a highlight plays
+from the moment it was tapped, and audio recorded while the screen was locked was
+played back and contains real sound — verified by listening, which is the only way
+that question could be answered. Still untested: a long session, where memory,
+battery and thermals would show up and 85 seconds tells you nothing.
+
+Audio records alongside the session and
 is written to storage in five-second chunks as it happens, so a long meeting costs
 disk rather than memory and a crash loses seconds. The wrap-up plays it back, each
 highlight can be heard as well as read, and a stretch the transcriber missed is
