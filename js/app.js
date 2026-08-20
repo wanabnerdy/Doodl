@@ -2,11 +2,13 @@ import { BACKGROUNDS, paintBackground } from './backgrounds.js';
 import * as S from './strokes.js';
 import { createTranscriber } from './speech.js';
 import * as store from './store.js';
+import { createRecorder } from './recorder.js';
+import { createPlayer } from './playback.js';
 
 const COLORS = ['#232a33', '#2f6fd0', '#c8402f', '#1f8a53', '#8a4fbd', '#d98324'];
 const SIZES = [2.5, 4.5, 8, 14];          // css px, converted to normalised units per stroke
 const SAVE_INTERVAL_MS = 5000;
-const BUILD = 'v1.2.2';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+const BUILD = 'v1.3.0';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -18,6 +20,8 @@ let wakeLock = null;
 let saveTimer = null;
 let livePainted = 0;
 let micPending = false;
+let recorder = null;
+let player = null;
 let cssW = 0, cssH = 0;
 let colour = COLORS[0];
 let sizePx = SIZES[1];
@@ -62,7 +66,9 @@ async function renderHome() {
         '<div class="meta">' + when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
         ' · ' + when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) +
         ' · ' + mins + ' min · ' + s.highlightCount + ' highlight' + (s.highlightCount === 1 ? '' : 's') +
-        ' · ' + s.wordCount + ' words</div>';
+        ' · ' + s.wordCount + ' words' +
+        (s.audioBytes ? ' · &#9654; ' + (s.audioBytes / 1048576).toFixed(1) + ' MB' : '') +
+        '</div>';
       btn.onclick = () => openSession(s.id);
       box.appendChild(btn);
     }
@@ -96,6 +102,16 @@ async function startSession(withMic = true) {
   sizeCanvases();
   $('hlCount').textContent = '0';
 
+  if (withMic) {
+    recorder = createRecorder({
+      log,
+      now,
+      // Written away the moment it arrives. Nothing accumulates in memory, so a long
+      // meeting costs storage rather than RAM, and a crash loses seconds.
+      onChunk: (blob, i, t) => store.putAudioChunk(session.id, i, blob, t)
+    });
+  }
+
   if (!withMic) {
     transcriber = null;
     setSpeechState('off');
@@ -119,6 +135,7 @@ async function startSession(withMic = true) {
   } else {
     await checkMicPermission();
     transcriber.begin();
+    if (recorder && recorder.supported) await recorder.start();
   }
 
   await requestWakeLock();
@@ -154,6 +171,10 @@ async function endSession() {
   clearInterval(saveTimer);
   saveTimer = null;
   const elapsed = now();
+  if (recorder) {
+    session.audio = await recorder.stop();
+    recorder = null;
+  }
   if (transcriber) {
     await transcriber.end();
     for (const h of session.highlights) h.anchor = transcriber.anchorAt(h.t);
@@ -333,6 +354,19 @@ function renderWrap(s) {
       card.appendChild(body);
       card.onclick = () => card.classList.toggle('big');
 
+      // Hearing the moment is the point of recording it. Only offered once a player
+      // exists, so a session with no audio does not sprout dead buttons.
+      if (s.audio && s.audio.chunks) {
+        const hear = document.createElement('button');
+        hear.className = 'hear';
+        hear.innerHTML = '&#9654; hear this moment';
+        hear.onclick = e => {
+          e.stopPropagation();          // the card itself toggles size
+          if (player) player.playFrom(toAudioMs(h.t, s));
+        };
+        quote.appendChild(hear);
+      }
+
       hlBox.appendChild(card);
     }
   }
@@ -347,7 +381,10 @@ function renderWrap(s) {
 
     box.innerHTML = items.map(item => {
       if (item.kind === 'gap') {
-        return '<p class="gap">not listening for ' + clock(item.g.to - item.g.from) + '</p>';
+        // A stretch with no transcript is exactly where the recording earns its keep.
+        const playable = s.audio && s.audio.chunks ? ' playable' : '';
+        return '<p class="gap' + playable + '" data-at="' + item.g.from + '">' +
+               'not listening for ' + clock(item.g.to - item.g.from) + '</p>';
       }
       const u = item.u;
       const hit = s.highlights.some(h => h.anchor && h.anchor.utteranceId === u.id);
@@ -356,6 +393,12 @@ function renderWrap(s) {
     }).join('');
   }
 
+  for (const p of box.querySelectorAll('p.gap.playable')) {
+    p.onclick = () => { if (player) player.playFrom(toAudioMs(Number(p.dataset.at), s)); };
+  }
+
+  setupAudio(s);
+
   $('shareBtn').onclick = () => exportSession(s);
   $('diagBtn').onclick = () => copyDiagnostics(s);
   $('deleteBtn').onclick = async () => {
@@ -363,6 +406,61 @@ function renderWrap(s) {
     await store.deleteSession(s.id);
     goHome();
   };
+}
+
+// The recorder starts a moment after the session clock does, so a session timestamp
+// is not an audio position. Everything that seeks converts through here.
+function toAudioMs(t, s) {
+  return Math.max(0, t - ((s.audio && s.audio.startedAt) || 0));
+}
+
+async function setupAudio(s) {
+  if (player) { player.destroy(); player = null; }
+  const box = $('player');
+  const del = $('deleteAudioBtn');
+  box.style.display = 'none';
+  del.style.display = 'none';
+  if (!s.audio || !s.audio.chunks) return;
+
+  const blob = await store.getAudioBlob(s.id, s.audio.mimeType);
+  if (!blob || !blob.size) return;
+
+  player = await createPlayer(blob);
+  box.style.display = 'flex';
+  del.style.display = 'block';
+  del.textContent = 'Delete audio (' + (blob.size / 1048576).toFixed(1) + ' MB), keep the notes';
+  del.onclick = async () => {
+    if (!confirm('Delete the recording? The doodle, transcript and highlights stay.')) return;
+    if (player) { player.destroy(); player = null; }
+    await store.deleteAudio(s.id);
+    s.audio = null;
+    await store.saveSession(s);
+    box.style.display = 'none';
+    del.style.display = 'none';
+    for (const b of document.querySelectorAll('.hear')) b.remove();
+    for (const p of document.querySelectorAll('.transcript p.gap')) p.classList.remove('playable');
+  };
+
+  const total = player.durationMs || s.audio.durationMs || 0;
+  const scrub = $('scrub');
+  scrub.max = String(total);
+  scrub.value = '0';
+  if (!player.seekable) scrub.disabled = true;
+
+  const paint = () => {
+    const at = Math.round(player.audio.currentTime * 1000);
+    if (!scrub.matches(':active')) scrub.value = String(at);
+    $('playTime').textContent = clock(at) + ' / ' + clock(total);
+    $('playBtn').innerHTML = player.audio.paused ? '&#9654;' : '&#10074;&#10074;';
+  };
+  player.audio.ontimeupdate = paint;
+  player.audio.onplay = paint;
+  player.audio.onpause = paint;
+  player.audio.onended = paint;
+  paint();
+
+  $('playBtn').onclick = () => player.toggle();
+  scrub.oninput = () => { player.audio.currentTime = Number(scrub.value) / 1000; paint(); };
 }
 
 // Shows the sentence a highlight landed in, with the moment itself marked — the
@@ -495,6 +593,7 @@ async function openSession(id) {
 }
 
 function goHome() {
+  if (player) { player.destroy(); player = null; }
   session = null;
   drawing = null;
   transcriber = null;

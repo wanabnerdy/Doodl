@@ -13,7 +13,10 @@ const note = (ok, label, extra = '') => {
   if (!ok) problems.push(label + (extra ? ': ' + extra : ''));
 };
 
-const browser = await chromium.launch();
+// A fake microphone, so the recording path is exercised rather than skipped.
+const browser = await chromium.launch({
+  args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
+});
 const context = await browser.newContext({ ...devices['iPhone 13'], hasTouch: true });
 // The session teardown asks for the microphone to reset the audio route. Granting it
 // here keeps the test on the same path a real device takes.
@@ -146,8 +149,35 @@ note(listed === 1, 'session survives a reload', listed + ' card(s)');
 note((await page.locator('.session-card').innerText()).includes('Smoke test meeting'), 'saved title shown on home');
 
 await page.locator('.session-card').first().click();
-await page.waitForTimeout(400);
+await page.waitForTimeout(3000);
 note(await page.locator('.hl-card').count() === 2, 'reopening a saved session restores highlights');
+note(await page.evaluate(() => Number(document.getElementById('scrub').max)) > 1000,
+     'and its recording still plays');
+
+// --- audio ----------------------------------------------------------------
+// Recording is stored in chunks as it happens, so the checks are that it survived
+// the session, that a duration was recovered from a file that reports none, and that
+// a highlight can be heard rather than only read.
+const audio = await page.evaluate(() => ({
+  playerShown: getComputedStyle(document.getElementById('player')).display !== 'none',
+  durationMs: Number(document.getElementById('scrub').max),
+  hearButtons: document.querySelectorAll('.hear').length,
+  deleteOffered: getComputedStyle(document.getElementById('deleteAudioBtn')).display !== 'none'
+}));
+note(audio.playerShown, 'a recording is available to play back');
+note(audio.durationMs > 1000, 'duration recovered from a headerless stream',
+     audio.durationMs + ' ms');
+note(audio.hearButtons === 2, 'each highlight can be heard', audio.hearButtons + ' buttons');
+note(audio.deleteOffered, 'audio can be deleted without losing the notes');
+
+const stored = await page.evaluate(async () => {
+  const db = await new Promise(res => { const r = indexedDB.open('doodl', 2); r.onsuccess = () => res(r.result); });
+  return await new Promise(res => {
+    const req = db.transaction('audio').objectStore('audio').getAll();
+    req.onsuccess = () => res(req.result.length);
+  });
+});
+note(stored > 0, 'chunks were written to storage during the session', stored + ' chunks');
 
 // --- console --------------------------------------------------------------
 const real = consoleErrors.filter(e => !/speech|SpeechRecognition|not-allowed|network/i.test(e));

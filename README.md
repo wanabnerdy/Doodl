@@ -12,6 +12,13 @@ Everything runs locally in the browser — no server, no API keys, no cost.
 transcription, highlights, wrap-up screen, local session history — all exercised in
 real sessions on an iPhone, not only in tests.
 
+**Phase 2 is built, pending device testing.** Audio records alongside the session and
+is written to storage in five-second chunks as it happens, so a long meeting costs
+disk rather than memory and a crash loses seconds. The wrap-up plays it back, each
+highlight can be heard as well as read, and a stretch the transcriber missed is
+playable where the gap is marked. Audio can be deleted on its own, leaving the doodle
+and transcript.
+
 Phase 2 (audio recording) and Phase 3 (stroke-synced playback) are not started, but
 Phase 1 stores what Phase 3 needs: every stroke is a timestamped vector, so playback is
 a matter of replaying data that is already there.
@@ -22,6 +29,8 @@ a matter of replaying data that is already there.
 - `js/strokes.js` — stroke model and rendering. Vectors with timestamps, never bitmaps
 - `js/speech.js` — transcription, highlight anchoring, restart watchdog
 - `js/store.js` — IndexedDB session persistence
+- `js/recorder.js` — audio capture, chunked to storage as it arrives
+- `js/playback.js` — playback, including recovering a duration the file does not carry
 - `js/backgrounds.js` — procedurally drawn paper templates
 - `js/app.js` — screens, canvas input, export
 - `probe/` — device capability probes (see below)
@@ -40,6 +49,10 @@ Safari 26.6), not what the APIs advertise:
 | First `onstart` took 4.5 s; later ones instant | A distinct "warming up" state, so the UI never lies about listening |
 | ~39 GB quota, IndexedDB blobs fine | IndexedDB over localStorage, whose ~5 MB cap is the real limit |
 | Recording and transcription coexisted | Phase 2 is not blocked on microphone contention |
+| Capture ran through backgrounding and a locked screen with no holes | Recording never stops itself on visibility |
+| Chunk handlers kept firing while hidden | The page is not frozen while capturing, so chunks can be written as they arrive |
+| ~93 MB per hour | Chunked to storage rather than held in memory |
+| Duration absent from the file, recovered by seeking past the end | Playback and Phase 3 are not blocked by the container |
 | Survived 20s of enforced silence, no restarts | Endurance is not the risk it looked like |
 | Warm start with permission granted: 7 ms | Earlier multi-second "start-up" was permission dialogs |
 | Finalisation fires on a detected pause, 2.6 s after talking stopped | Anchoring must not wait for finals |

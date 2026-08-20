@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#14161c">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <title>Doodl</title>
-<link rel="stylesheet" href="./css/app.css?v=114">
+<link rel="stylesheet" href="./css/app.css?v=115">
 </head>
 <body>
 
@@ -76,6 +76,12 @@
   <p class="coverage" id="coverage" style="display:none"></p>
   <p class="released" id="released" style="display:none"></p>
 
+  <div class="player" id="player" style="display:none">
+    <button class="play" id="playBtn" aria-label="Play">&#9654;</button>
+    <input type="range" id="scrub" min="0" max="1000" value="0">
+    <span class="ptime" id="playTime">00:00</span>
+  </div>
+
   <p class="section-label">Highlights</p>
   <p class="legend"><i></i> marks the moment you tapped</p>
   <div id="hlList"></div>
@@ -86,12 +92,13 @@
   <button class="big-btn" id="shareBtn" style="margin-top:22px">Export</button>
   <button class="big-btn ghost" id="diagBtn">Copy diagnostics</button>
   <button class="big-btn ghost" id="homeBtn">Back to sessions</button>
+  <button class="big-btn ghost" id="deleteAudioBtn" style="display:none">Delete audio, keep the notes</button>
   <button class="big-btn ghost" id="deleteBtn" style="color:#ff8080">Delete this session</button>
 </section>
 
 <div id="insetProbe"></div>
 <div id="debug"></div>
 
-<script type="module" src="./js/app.js?v=114"></script>
+<script type="module" src="./js/app.js?v=115"></script>
 </body>
 </html>

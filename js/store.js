@@ -2,8 +2,9 @@
 // ~39 GB of quota here, against localStorage's ~5 MB — and stroke data grows fast.
 
 const DB_NAME = 'doodl';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'sessions';
+const AUDIO = 'audio';
 
 let dbPromise = null;
 
@@ -16,6 +17,14 @@ function open() {
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'id' }).createIndex('startedAt', 'startedAt');
       }
+      // Audio lives in chunks, keyed by session and order, rather than as one blob on
+      // the session record. A meeting is written as it happens — roughly 93 MB an hour
+      // — and holding that in memory to save at the end would risk the lot on a crash
+      // and put hundreds of megabytes in RAM on a long meeting.
+      if (!db.objectStoreNames.contains(AUDIO)) {
+        db.createObjectStore(AUDIO, { keyPath: ['sessionId', 'index'] })
+          .createIndex('sessionId', 'sessionId');
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -23,10 +32,10 @@ function open() {
   return dbPromise;
 }
 
-function tx(mode, fn) {
+function tx(mode, fn, storeName = STORE) {
   return open().then(db => new Promise((resolve, reject) => {
-    const t = db.transaction(STORE, mode);
-    const result = fn(t.objectStore(STORE));
+    const t = db.transaction(storeName, mode);
+    const result = fn(t.objectStore(storeName));
     t.oncomplete = () => resolve(result && result.__req ? result.__req.result : result);
     t.onerror = () => reject(t.error);
     t.onabort = () => reject(t.error);
@@ -41,7 +50,8 @@ export function getSession(id) {
   return tx('readonly', store => ({ __req: store.get(id) }));
 }
 
-export function deleteSession(id) {
+export async function deleteSession(id) {
+  await deleteAudio(id);
   return tx('readwrite', store => { store.delete(id); });
 }
 
@@ -57,10 +67,47 @@ export async function listSessions() {
       background: s.background,
       strokeCount: (s.strokes || []).length,
       highlightCount: (s.highlights || []).length,
-      wordCount: (s.utterances || []).reduce((n, u) => n + u.text.trim().split(/\s+/).filter(Boolean).length, 0)
+      wordCount: (s.utterances || []).reduce((n, u) => n + u.text.trim().split(/\s+/).filter(Boolean).length, 0),
+      audioBytes: s.audio ? s.audio.bytes : 0
     }))
     .sort((a, b) => b.startedAt - a.startedAt);
 }
+
+/* ---------------------------------------------------------------- audio ---- */
+
+// One chunk, written the moment it arrives from the recorder.
+export function putAudioChunk(sessionId, index, blob, t) {
+  return tx('readwrite', store => { store.put({ sessionId, index, blob, t }); }, AUDIO);
+}
+
+function chunksFor(sessionId) {
+  return tx('readonly', store => ({
+    __req: store.index('sessionId').getAll(IDBKeyRange.only(sessionId))
+  }), AUDIO).then(rows => (rows || []).sort((a, b) => a.index - b.index));
+}
+
+// Reassembled in order. The pieces are only meaningful as one stream — a WebM chunk
+// on its own has no header and will not play.
+export async function getAudioBlob(sessionId, mimeType) {
+  const rows = await chunksFor(sessionId);
+  if (!rows.length) return null;
+  return new Blob(rows.map(r => r.blob), { type: mimeType || rows[0].blob.type });
+}
+
+export async function audioBytes(sessionId) {
+  const rows = await chunksFor(sessionId);
+  return rows.reduce((n, r) => n + (r.blob.size || 0), 0);
+}
+
+export async function deleteAudio(sessionId) {
+  const rows = await chunksFor(sessionId);
+  await tx('readwrite', store => {
+    for (const r of rows) store.delete([sessionId, r.index]);
+  }, AUDIO);
+  return rows.length;
+}
+
+/* -------------------------------------------------------------- storage ---- */
 
 // Without this, the browser may evict everything under storage pressure.
 export async function requestPersistence() {

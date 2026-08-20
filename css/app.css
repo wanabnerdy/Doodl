@@ -178,6 +178,25 @@ html, body {
   border-left: 2px dashed var(--warn); padding-left: 10px; margin: 12px 0;
 }
 
+.player {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 16px;
+}
+.player button.play {
+  width: 42px; height: 42px; flex: none; border-radius: 50%;
+  border: none; background: var(--accent); color: #1a1206; font-size: 15px;
+}
+.player input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.player .ptime { font: 600 12px/1 ui-monospace, Menlo, monospace; color: var(--dim); flex: none; }
+
+.hear {
+  border: 1px solid var(--line); background: #232833; color: var(--accent);
+  border-radius: 8px; padding: 7px 10px; font: 600 12px/1 inherit; margin-top: 8px;
+}
+.transcript p.gap { cursor: pointer; }
+.transcript p.gap.playable::after { content: '  \25B6 hear it'; color: var(--accent); font-style: normal; }
+
 .hl-card {
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
   padding: 12px; margin-bottom: 12px;
