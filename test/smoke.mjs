@@ -118,6 +118,48 @@ await page.waitForTimeout(150);
 note((await page.locator('#hlCount').innerText()) === '2', 'highlight counter updates');
 note(await page.evaluate(() => window.__doodl.strokeCount()) === 3, 'drawing continues between highlights');
 
+// --- palm rejection -------------------------------------------------------
+// A palm rests on the glass before the pen tip lands, so its marks are already
+// committed when the pen appears. Touch must stop drawing from then on, and the marks
+// the hand already left must be swept up.
+const palm = await page.evaluate(async () => {
+  const canvas = document.getElementById('inkCanvas');
+  const r = canvas.getBoundingClientRect();
+  const at = (x, y) => ({ clientX: r.left + x, clientY: r.top + y });
+
+  const send = (type, opts) => canvas.dispatchEvent(new PointerEvent(type,
+    Object.assign({ bubbles: true, pointerId: opts.id, pointerType: opts.kind,
+                    isPrimary: true, pressure: 0.5 }, at(opts.x, opts.y))));
+
+  const before = window.__doodl.strokeCount();
+
+  // A pause first: earlier drawing is deliberate work and must survive the sweep.
+  await new Promise(r => setTimeout(r, 1200));
+
+  // the heel of the hand goes down first
+  send('pointerdown', { id: 91, kind: 'touch', x: 60, y: 200 });
+  send('pointermove', { id: 91, kind: 'touch', x: 75, y: 210 });
+  send('pointerup',   { id: 91, kind: 'touch', x: 75, y: 210 });
+  const afterPalm = window.__doodl.strokeCount();
+
+  // then the pen
+  send('pointerdown', { id: 92, kind: 'pen', x: 150, y: 120 });
+  send('pointermove', { id: 92, kind: 'pen', x: 200, y: 140 });
+  send('pointerup',   { id: 92, kind: 'pen', x: 200, y: 140 });
+  const afterPen = window.__doodl.strokeCount();
+
+  // a later palm touch must not draw at all
+  send('pointerdown', { id: 93, kind: 'touch', x: 70, y: 240 });
+  send('pointermove', { id: 93, kind: 'touch', x: 90, y: 250 });
+  send('pointerup',   { id: 93, kind: 'touch', x: 90, y: 250 });
+
+  return { before, afterPalm, afterPen, final: window.__doodl.strokeCount() };
+});
+note(palm.afterPalm === palm.before + 1, 'a palm alone still draws, before any pen is seen');
+note(palm.afterPen === palm.before + 1, 'the pen sweeps up the marks the palm just left',
+     'strokes went ' + palm.afterPalm + ' -> ' + palm.afterPen);
+note(palm.final === palm.afterPen, 'and touch stops drawing once a pen is in use');
+
 // --- finish ---------------------------------------------------------------
 await page.click('#endBtn');
 // Waiting on the screen rather than a fixed delay: finishing must not be gated on the

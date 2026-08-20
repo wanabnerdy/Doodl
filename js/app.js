@@ -8,7 +8,11 @@ import { createPlayer } from './playback.js';
 const COLORS = ['#232a33', '#2f6fd0', '#c8402f', '#1f8a53', '#8a4fbd', '#d98324'];
 const SIZES = [2.5, 4.5, 8, 14];          // css px, converted to normalised units per stroke
 const SAVE_INTERVAL_MS = 5000;
-const BUILD = 'v1.3.0';   // bump on each deploy; shown on the home screen so a stale cache is obvious
+// A palm lands a few hundred milliseconds before the tip, so the sweep is kept
+// narrow. Wider, and someone who sketches with a finger and then picks up the pen
+// loses the work they just did.
+const PALM_WINDOW_MS = 800;
+const BUILD = 'v1.3.1';   // bump on each deploy; shown on the home screen so a stale cache is obvious
 
 const $ = id => document.getElementById(id);
 
@@ -21,6 +25,10 @@ let saveTimer = null;
 let livePainted = 0;
 let micPending = false;
 let recorder = null;
+// Latched the first time a pen is seen. iPadOS reports an Apple Pencil as 'pen' and a
+// resting palm as 'touch', so once a pen is in use, touch is the hand — not drawing.
+let penSeen = false;
+let rejectPalm = true;
 let player = null;
 let cssW = 0, cssH = 0;
 let colour = COLORS[0];
@@ -98,6 +106,7 @@ async function startSession(withMic = true) {
     highlights: []
   };
   drawing = S.createDrawing();
+  penSeen = false;
   show('session');
   sizeCanvases();
   $('hlCount').textContent = '0';
@@ -245,21 +254,36 @@ const toLocal = e => {
 
 inkCanvas.addEventListener('pointerdown', e => {
   if (!drawing) return;
+
+  if (e.pointerType === 'pen' && !penSeen) {
+    penSeen = true;
+    // The palm is usually down before the tip touches, so its marks already exist.
+    const dropped = S.dropRecentTouchStrokes(drawing, now(), PALM_WINDOW_MS);
+    if (dropped) { repaintInk(); log('pen detected — removed ' + dropped + ' palm mark(s)'); }
+    else log('pen detected — ignoring touch from now on');
+    updatePenPill();
+  }
+
+  // Once a pen has been used, a touch is a resting hand.
+  if (rejectPalm && penSeen && e.pointerType !== 'pen') return;
+
   closeTools();
   const p = toLocal(e);
-  S.beginStroke(drawing, p.x, p.y, now(), colour, sizePx / cssW);
+  S.beginStroke(drawing, p.x, p.y, now(), colour, sizePx / cssW, e.pointerType);
   livePainted = 1;
   const s = drawing.live, pt = s.points[0];
   inkCtx.fillStyle = colour;
   inkCtx.beginPath();
   inkCtx.arc(pt.x * cssW, pt.y * cssW, Math.max(pt.w * cssW / 2, 0.5), 0, Math.PI * 2);
   inkCtx.fill();
-  inkCanvas.setPointerCapture(e.pointerId);
+  // Throws if the pointer has already gone — a palm lifted mid-event, for instance.
+  try { inkCanvas.setPointerCapture(e.pointerId); } catch (err) { /* nothing to capture */ }
   e.preventDefault();
 }, { passive: false });
 
 inkCanvas.addEventListener('pointermove', e => {
   if (!drawing || !drawing.live) return;
+  if (rejectPalm && penSeen && e.pointerType !== 'pen') return;
   // The probe reported up to 6 coalesced points per event — using them is the
   // difference between a smooth line and a chain of visible corners.
   const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
@@ -657,6 +681,15 @@ function buildTools() {
   });
 }
 
+// Only shown once a pen has actually been used — there is nothing to say otherwise.
+function updatePenPill() {
+  const row = $('penRow');
+  if (!row) return;
+  row.style.display = penSeen ? 'block' : 'none';
+  $('palmBtn').textContent = rejectPalm ? 'Pen only (palm ignored)' : 'Pen and finger';
+  $('palmBtn').className = 'bg-opt' + (rejectPalm ? ' sel' : '');
+}
+
 function closeTools() { $('tools').classList.remove('open'); }
 
 /* ----------------------------------------------------------------- misc */
@@ -688,6 +721,7 @@ $('undoBtn').onclick = () => { S.undo(drawing); repaintInk(); };
 $('clearBtn').onclick = () => { if (confirm('Clear the whole page?')) { S.clear(drawing); repaintInk(); closeTools(); } };
 $('toolsBtn').onclick = () => $('tools').classList.toggle('open');
 $('toolsDone').onclick = closeTools;
+$('palmBtn').onclick = () => { rejectPalm = !rejectPalm; updatePenPill(); };
 $('homeBtn').onclick = goHome;
 $('debugToggle').onclick = () => $('debug').classList.toggle('open');
 

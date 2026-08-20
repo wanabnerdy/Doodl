@@ -16,12 +16,13 @@ export function createDrawing() {
   return { strokes: [], live: null, _speed: 0 };
 }
 
-export function beginStroke(drawing, x, y, t, color, baseWidth) {
+export function beginStroke(drawing, x, y, t, color, baseWidth, kind) {
   drawing._speed = 0;
   drawing.live = {
     color,
     baseWidth,
     startedAt: t,
+    kind: kind || 'touch',      // 'pen' or 'touch' — palm rejection needs to tell them apart
     points: [{ x, y, t, w: baseWidth * MAX_FACTOR }]
   };
   return drawing.live;
@@ -49,6 +50,19 @@ export function endStroke(drawing) {
   s.endedAt = s.points[s.points.length - 1].t;
   drawing.strokes.push(s);
   return s;
+}
+
+// A palm usually lands before the pen tip does, so the marks it leaves are already
+// committed by the time a pen is detected. This removes them — touch strokes only,
+// and only ones started in the moments just before the pen arrived.
+export function dropRecentTouchStrokes(drawing, beforeT, windowMs) {
+  const cutoff = beforeT - windowMs;
+  const before = drawing.strokes.length;
+  drawing.strokes = drawing.strokes.filter(
+    s => s.kind === 'pen' || s.startedAt < cutoff
+  );
+  if (drawing.live && drawing.live.kind !== 'pen') drawing.live = null;
+  return before - drawing.strokes.length;
 }
 
 export function undo(drawing) {

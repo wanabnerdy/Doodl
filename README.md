@@ -50,6 +50,7 @@ Safari 26.6), not what the APIs advertise:
 | Measured | Consequence |
 |---|---|
 | Pointer pressure is flat zero on touch | Line weight comes from stroke speed instead |
+| iPadOS reports a Pencil as `pen` and a resting palm as `touch` | Touch stops drawing once a pen is used, and marks the palm already left are swept |
 | Up to 6 coalesced points per pointer event | Used for smooth lines rather than visible corners |
 | A 250-char final arrived *after* recognition was stopped | Highlights anchor to interim samples, never to finals |
 | First `onstart` took 4.5 s; later ones instant | A distinct "warming up" state, so the UI never lies about listening |
