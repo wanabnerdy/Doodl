@@ -85,6 +85,13 @@ const clock = ms => {
   return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 };
 
+// Leaving the page entirely must close the microphone — otherwise the probe leaks a
+// live stream exactly as the app did. Deliberately NOT on visibilitychange: hiding is
+// the thing being measured, so cleaning up there would fake the result.
+window.addEventListener('pagehide', () => {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+});
+
 document.addEventListener('visibilitychange', () => {
   if (!startedAt) return;
   const at = Date.now() - startedAt;
@@ -150,8 +157,13 @@ async function stop() {
   R.bytes = blob.size;
   R.capturedMs = R.chunks.reduce((n, c) => n + Math.min(c.sincePrevMs, CHUNK_MS * 2), 0);
 
-  // Can it be seeked? Phase 3 playback depends on jumping to a highlight, and a
-  // MediaRecorder stream is not always a seekable file.
+  // Phase 3 playback jumps to a highlight, so the recording has to be seekable. A
+  // MediaRecorder file is written as a live stream with no duration in its header, so
+  // the obvious check usually fails. Three methods are tried, because "the naive one
+  // says no" and "it cannot be done" are different answers with different consequences.
+  R.formatsSupported = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/mpeg']
+    .filter(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m));
+
   const url = URL.createObjectURL(blob);
   const audio = new Audio();
   audio.preload = 'metadata';
@@ -161,11 +173,44 @@ async function stop() {
     audio.onerror = res;
     setTimeout(res, 4000);
   });
-  R.reportedDuration = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : null;
-  if (R.reportedDuration) {
-    const target = audio.duration / 2;
+
+  // 1. straight read
+  R.durationPlain = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : null;
+
+  // 2. the seek-past-the-end trick: asking for an impossible position forces some
+  //    browsers to scan the file and work out the real duration.
+  if (!R.durationPlain) {
+    await new Promise(res => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; res(); } };
+      audio.ondurationchange = () => { if (Number.isFinite(audio.duration)) finish(); };
+      try { audio.currentTime = 1e101; } catch (e) { finish(); }
+      setTimeout(finish, 3000);
+    });
+    R.durationAfterTrick = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : null;
+    audio.ondurationchange = null;
+    try { audio.currentTime = 0; } catch (e) { /* nothing to rewind */ }
+  }
+
+  // 3. decode it outright. Slower and holds the whole file in memory, but it gives a
+  //    true duration and would let playback be driven by Web Audio instead, where the
+  //    start offset is ours to choose and seeking is not the container's business.
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+    R.durationDecoded = Math.round(buf.duration * 1000);
+    ctx.close();
+  } catch (e) {
+    R.decodeError = e.name || String(e);
+  }
+
+  R.reportedDuration = R.durationPlain || R.durationAfterTrick || R.durationDecoded || null;
+
+  if (R.durationPlain || R.durationAfterTrick) {
+    const known = (R.durationPlain || R.durationAfterTrick) / 1000;
+    const target = known / 2;
     audio.currentTime = target;
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 800));
     R.seek = { target: Math.round(target * 1000), landedAt: Math.round(audio.currentTime * 1000) };
     R.seekable = Math.abs(audio.currentTime - target) < 1.5;
   } else {
@@ -190,9 +235,17 @@ function render() {
     ['Coverage', pct + '%', pct >= 98 ? 'ok' : pct >= 80 ? 'warn' : 'bad'],
     ['Size', (R.bytes / 1048576).toFixed(2) + ' MB', ''],
     ['Per hour', ((R.bytes / R.elapsedMs) * 3600000 / 1048576).toFixed(0) + ' MB', ''],
-    ['Duration readable', R.reportedDuration ? clock(R.reportedDuration) : 'no',
-      R.reportedDuration ? 'ok' : 'warn'],
-    ['Seekable (Phase 3 needs this)', R.seekable ? 'yes' : 'no', R.seekable ? 'ok' : 'bad']
+    ['Recorded as', R.mimeType, ''],
+    ['Duration, read directly', R.durationPlain ? clock(R.durationPlain) : 'no',
+      R.durationPlain ? 'ok' : 'warn'],
+    ['Duration, after seek trick', R.durationAfterTrick ? clock(R.durationAfterTrick) : '—',
+      R.durationAfterTrick ? 'ok' : ''],
+    ['Duration, by decoding', R.durationDecoded ? clock(R.durationDecoded) : (R.decodeError || 'no'),
+      R.durationDecoded ? 'ok' : 'warn'],
+    ['Seekable as a file', R.seekable ? 'yes' : 'no', R.seekable ? 'ok' : 'bad'],
+    ['Playback via Web Audio', R.durationDecoded ? 'possible' : 'no',
+      R.durationDecoded ? 'ok' : 'bad'],
+    ['Other formats available', R.formatsSupported.join(', ') || 'none', '']
   ];
   if (R.holes.length) {
     rows.push(['Holes at', R.holes.map(h => clock(h.from) + '–' + clock(h.to)).join(', '), 'bad']);
